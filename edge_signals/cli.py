@@ -80,6 +80,26 @@ def order_images_by_replay(paths, a, out):
     return ordered
 
 
+def progress_lines(records, eng, total=None, out=None):
+    """Pass the records through and print one line per video (or clip) when it is finished: name, frames processed, requests so far.
+    A video is finished when the next one starts (the engine has then processed all its frames) or when the stream ends."""
+    state = {"key": None, "n": 0, "k": 0}
+    out = out or sys.stderr
+
+    def line():
+        if state["key"] is not None:
+            of = f"/{total}" if total else ""
+            print(f"[stream] video {state['k']}{of} {state['key']}: {state['n']} frames processed, {eng.n_requests} request(s) so far (stream total {eng.n_frames} frames)", file=out, flush=True)
+    for r in records:
+        key = r.video or r.clip_id
+        if key != state["key"]:
+            line()
+            state.update(key=key, n=0, k=state["k"] + 1)
+        state["n"] += 1
+        yield r
+    line()                                            # the stream is exhausted: the engine has processed the last frame of the last video
+
+
 def cmd_stream(a):
     from .inference import Detector
     inf = load_yaml(rp(a.inference))
@@ -132,11 +152,15 @@ def cmd_stream(a):
                                          st["device_id"], inf["model"]["version"])
     else:
         records = stream_records(det, paths, st["fps"], inf["predict"]["chunk"], st["device_id"], inf["model"]["version"])
+    n_units = len(videos) if videos else len({(p.stem.rsplit("-", 1)[0]) for p in paths})
+    prog = progress_lines(records, eng, n_units)
     t0 = time.perf_counter()
-    res = eng.run(records)
+    res = eng.run(prog)
     summary = {"input": "video" if videos else "images", "videos": [Path(p).stem for p in videos] if videos else None,
                "resolution": None if resolution is None else {"stream": resolution["stream"], "n_requested": resolution["n_requested"], "n_replayed": len(resolution["replayed"]), "not_replayed": [m["code"] for m in resolution["not_replayed"]]}, "frame_stride": stride,
                "n_frames": eng.n_frames, "n_pairs": eng.n_pairs, "n_windows": len(res["windows"]),
+               "n_windows_by_signal": {n: sum(1 for w in res["windows"] if w.signal == n) for n in sorted({w.signal for w in res["windows"]})},
+               "n_windows_note": "n_windows counts window records over ALL signals (one per signal per window, as in windows.jsonl); n_windows_by_signal gives the count per signal (consistency windows = the trigger's windows)",
                "n_requests": len(res["triggers"]), "requests_by_rule": {r: sum(1 for x in res["triggers"] if x.rule == r) for r in {x.rule for x in res["triggers"]}}, "n_scene_cuts": len(res["context"]),
                "dropped_partial_windows": eng.dropped_partial_windows, "wall_s": round(time.perf_counter() - t0, 2),
                "signal_stage_s_per_signal": {k: round(v, 4) for k, v in eng.timing.items()},

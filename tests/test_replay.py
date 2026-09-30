@@ -110,7 +110,11 @@ def test_skip_is_the_default_the_run_completes_and_resolution_json_records_it(cl
     assert "[warning] video MVI_0001_VIS (s1): missing" in err
     res = json.load(open(tmp / "out" / "resolution.json"))
     assert [x["code"] for x in res["replayed"]] == ["MVI_0003_NIR", "MVI_0002_VIS"] and res["resolution"]["MVI_0001_VIS"]["status"] == "missing" and res["stream"] == "st"
+    assert "[stream] video 1/2 MVI_0003_NIR: 8 frames processed, 0 request(s) so far (stream total 8 frames)" in err
+    assert "[stream] video 2/2 MVI_0002_VIS: 5 frames processed, 0 request(s) so far (stream total 13 frames)" in err
     summ = json.load(open(tmp / "out" / "summary.json"))
+    assert set(summ["n_windows_by_signal"]) <= {"consistency", "confidence", "platform_motion", "feature_drift"} and sum(summ["n_windows_by_signal"].values()) == summ["n_windows"]
+    assert "ALL signals" in summ["n_windows_note"]
     assert summ["videos"] == ["MVI_0003_NIR", "MVI_0002_VIS"] and summ["n_frames"] == 8 + 5 and summ["resolution"]["not_replayed"] == ["MVI_0001_VIS"]
     fr = [json.loads(l) for l in open(tmp / "out" / "frames.jsonl")]
     assert [f["video"] for f in fr] == ["MVI_0003_NIR"] * 8 + ["MVI_0002_VIS"] * 5 and fr[8]["frame_index"] == 0

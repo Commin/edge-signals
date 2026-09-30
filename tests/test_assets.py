@@ -307,3 +307,119 @@ def test_mocked_http_error_and_drive_quota_page(tmp_path):
     assert r["w"]["status"] == "failed" and "403" in r["w"]["reason"]
     with pytest.raises(SystemExit, match="web page instead of the file"):
         A.download("gdrive:F1", tmp_path / "q.bin", session=FakeSession(lambda u, h: FakeResp(200, b"<html>Quota exceeded</html>", "text/html")))
+
+
+# ---------------------------------------------------------------- timeouts, Drive web pages, progress (v0.5.1)
+import socket as _socket
+import time as _time
+
+
+class HangingServer:
+    """Raw socket server: `mode` = 'silent' (accepts, never answers) or 'stall' (sends the headers and 200,000 body bytes, then goes quiet)."""
+
+    def __init__(self, mode):
+        self.mode = mode
+        self.sock = _socket.socket()
+        self.sock.bind(("127.0.0.1", 0))
+        self.sock.listen(5)
+        self.port = self.sock.getsockname()[1]
+        self.conns = []
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def _run(self):
+        while True:
+            try:
+                c, _ = self.sock.accept()
+            except OSError:
+                return
+            self.conns.append(c)
+            if self.mode == "stall":
+                c.recv(65536)
+                c.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: 1000000\r\n\r\n" + b"x" * 200000)
+
+    def close(self):
+        self.sock.close()
+        for c in self.conns:
+            c.close()
+
+
+def test_shipped_timeouts_are_15_s_connect_and_60_s_read():
+    assert A.download.__defaults__[2] == (15, 60) and (A.CONNECT_TIMEOUT, A.READ_TIMEOUT) == (15, 60) and A.PROGRESS_EVERY == 10.0
+
+
+def test_a_server_that_never_answers_times_out_with_the_host_and_the_cause(tmp_path):
+    srv = HangingServer("silent")
+    try:
+        t0 = _time.monotonic()
+        with pytest.raises(SystemExit, match=r"127\.0\.0\.1 accepted the connection but sent nothing for 0\.5 s"):
+            A.download(f"http://127.0.0.1:{srv.port}/w.pt", tmp_path / "w.bin", timeout=(1, 0.5), label="maritime_s_base")
+        assert _time.monotonic() - t0 < 10
+    finally:
+        srv.close()
+
+
+def test_a_transfer_that_stalls_keeps_the_partial_file_for_the_next_run(tmp_path):
+    srv = HangingServer("stall")
+    try:
+        with pytest.raises(SystemExit, match=r"stopped sending data for 0\.5 s; the partial file is kept"):
+            A.download(f"http://127.0.0.1:{srv.port}/w.pt", tmp_path / "w.bin", timeout=(1, 0.5))
+        assert 0 < (tmp_path / "w.bin.part").stat().st_size <= 200000 and not (tmp_path / "w.bin").exists()
+    finally:
+        srv.close()
+
+
+def test_connect_failures_name_the_host_and_suggest_network_host_or_dns(tmp_path):
+    import requests
+
+    class Boom:
+        def __init__(self, exc):
+            self.exc = exc
+
+        def get(self, *a, **k):
+            raise self.exc
+    for exc, text in ((requests.exceptions.ConnectTimeout("t"), "could not connect to drive.google.com within 15 s"),
+                      (requests.exceptions.ConnectionError("dns"), "cannot reach drive.google.com")):
+        with pytest.raises(SystemExit) as e:
+            A.download("https://drive.google.com/file/d/F1/view", tmp_path / "f.bin", session=Boom(exc), label="data_clear_val")
+        msg = str(e.value)
+        assert text in msg and "data_clear_val" in msg and "--network host" in msg and "--dns <resolver>" in msg and "--network none" in msg
+
+
+@pytest.mark.parametrize("page,reason", [("<html>Google Drive - Quota exceeded for this file</html>", "quota of this file is exceeded"),
+                                         ("<html>You need access. Request access</html>", "not shared with"),
+                                         ("<html>Sorry, the file you have requested does not exist.</html>", "does not exist"),
+                                         ("<html>something else</html>", "quota, permission or a changed Drive page")])
+def test_drive_html_page_stops_with_the_file_id_and_the_reason(tmp_path, page, reason):
+    with pytest.raises(SystemExit) as e:
+        A.download("gdrive:1AbC_def-9", tmp_path / "f.bin", session=FakeSession(lambda u, h: FakeResp(200, page.encode(), "text/html; charset=utf-8")))
+    assert "web page instead of the file" in str(e.value) and "file id 1AbC_def-9" in str(e.value) and reason in str(e.value)
+
+
+def test_fetch_assets_stops_at_the_first_drive_page_and_keeps_what_it_has(tmp_path):
+    good, other = b"first" * 200, b"second" * 200
+    cfg = {"assets": [{"name": "a", "kind": "weights", "url": "https://example.org/a.pt", "sha256": sha(good), "size_bytes": len(good), "target": "$EDGE_ASSETS/weights/a.pt", "extract": False},
+                      {"name": "b", "kind": "weights", "url": "gdrive:FILE_B", "sha256": sha(other), "size_bytes": len(other), "target": "$EDGE_ASSETS/weights/b.pt", "extract": False},
+                      {"name": "c", "kind": "weights", "url": "https://example.org/c.pt", "sha256": sha(good), "size_bytes": len(good), "target": "$EDGE_ASSETS/weights/c.pt", "extract": False}]}
+    sess = FakeSession(lambda u, h: FakeResp(200, b"<html>Quota exceeded</html>", "text/html") if "FILE_B" in u else FakeResp(200, good))
+    with pytest.raises(SystemExit) as e:
+        A.fetch_assets(cfg, assets_dir=tmp_path / "a", data_dir=tmp_path / "d", session=sess)
+    assert "b:" in str(e.value) and "file id FILE_B" in str(e.value) and "quota" in str(e.value) and "Stopped" in str(e.value)
+    assert (tmp_path / "a/weights/a.pt").read_bytes() == good and not (tmp_path / "a/weights/c.pt").exists()        # a is kept, c was never tried
+    assert not any("example.org/c.pt" in u for u, _ in sess.calls)
+
+
+def test_a_progress_line_is_printed_while_a_file_downloads(tmp_path, monkeypatch, capsys):
+    data = b"abcdefgh" * 4096
+    monkeypatch.setattr(A, "PROGRESS_EVERY", 0.0)                           # a line after every chunk
+    monkeypatch.setattr(A, "NET_CHUNK", 8192)
+    A.download("https://example.org/w.pt", tmp_path / "w.bin", session=FakeSession(lambda u, h: FakeResp(200, data)), expected_size=len(data), label="maritime_s_base")
+    err = capsys.readouterr().err
+    assert "[fetch-assets] maritime_s_base: connecting to example.org" in err
+    lines = [l for l in err.splitlines() if "MB" in l and "%" in l]
+    assert len(lines) >= 2 and "of 0.0 MB" in lines[0] and "100 %" in lines[-1] and "MB/s" in lines[0]
+    assert "maritime_s_base: 0.0 MB received" in err
+
+
+def test_no_progress_line_is_needed_for_a_short_download_but_the_summary_line_is_always_there(tmp_path, capsys):
+    A.download("https://example.org/w.pt", tmp_path / "w.bin", session=FakeSession(lambda u, h: FakeResp(200, b"tiny")), label="x1")
+    assert "x1: 0.0 MB received" in capsys.readouterr().err

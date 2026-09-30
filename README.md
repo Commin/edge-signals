@@ -9,11 +9,10 @@ detector on the labelled frames of the same video.
 downloaded from Google Drive** at run time by `fetch-assets` (SHA256-verified, links in `configs/assets.yaml`) into the `/assets` and `/data` volumes; `yolov12n.pt` comes from the official YOLOv12
 release. After that every command runs offline (`--network none`). The original videos are not distributed: see "Videos" below.
 
-Licence: GPL-3.0 (`LICENSE`). Third-party components and their licences: `NOTICE` (the YOLOv12 fork installed in the image is AGPL-3.0, unmodified).
+Licence: GPL-3.0-only (`LICENSE`). Third-party components and their licences: `NOTICE` (the YOLOv12 fork installed in the image is AGPL-3.0, unmodified).
 
 **Dataset.** The frames, labels and videos derive from the Singapore Maritime Dataset (SMD): https://sites.google.com/site/dilipprasad/home/singapore-maritime-dataset. If you use them, cite:
-D. K. Prasad, D. Rajan, L. Rachmawati, E. Rajabally, and C. Quek, "Video Processing from Electro-optical Sensors for Object Detection and Tracking in Maritime Environment: A Survey,"
-*IEEE Transactions on Intelligent Transportation Systems*, vol. 18, no. 8, pp. 1993-2016, 2017.
+D. K. Prasad, D. Rajan, L. Rachmawati, E. Rajabally, and C. Quek, "Video Processing From Electro-Optical Sensors for Object Detection and Tracking in a Maritime Environment: A Survey," *IEEE Transactions on Intelligent Transportation Systems*, vol. 18, no. 8, pp. 1993–2016, 2017, doi: 10.1109/TITS.2016.2634580.
 
 * `edge_signals/` - the framework (plugin interface, registry, windows, trigger, engine, video input, inference with feature capture, adaptation stages, `assets.py`).
 * `third_party/consistency/` - the released consistency package, vendored unchanged (see `VENDORED.txt` for the commit; `FILES.sha256`).
@@ -22,25 +21,33 @@ D. K. Prasad, D. Rajan, L. Rachmawati, E. Rajabally, and C. Quek, "Video Process
 * `docs/HANDOFF.md` - step-by-step handoff for the integration (commands verified in fresh containers).
 * `docker/`, `Dockerfile` - the environment of the YOLOv12 fork, exactly as the fork specifies. `tests/` - unit tests on tiny synthetic fixtures.
 
+## Requirements
+
+x86-64 Linux host with Docker, an NVIDIA GPU and the NVIDIA Container Toolkit (CPU works for tests and replay, retraining needs a GPU). About 11 GB for the image, 1.1 GB for assets and labelled frames, 5.4 GB for the original
+videos. Only `fetch-assets` (and the first `docker pull`) needs the network: **if container networking is restricted or the container cannot resolve names, run `fetch-assets` with `--network host` or with
+`--dns <resolver>`**; every other command runs with `--network none`. `fetch-assets` prints a progress line at least every 10 s per file, times out after 15 s (connect) / 60 s (no data), and stops with the file id if Google
+Drive answers with a web page (quota, permission) instead of the file.
+
 ## Quick start
 
 ```bash
 # 1. pull the image (runtime and test targets; no weights or data inside) and prepare three host directories
-docker pull ghcr.io/commin/edge-signals:v0.5.0
+docker pull ghcr.io/commin/edge-signals:v0.5.1
 mkdir -p assets data outputs && chmod 777 outputs            # the container runs as uid 10001
-RUN="docker run --rm --gpus all --shm-size=2g -v $PWD/assets:/assets -v $PWD/data:/data -v $PWD/outputs:/outputs ghcr.io/commin/edge-signals:v0.5.0"
+RUN="docker run --rm --gpus all --shm-size=2g -v $PWD/assets:/assets -v $PWD/data:/data -v $PWD/outputs:/outputs ghcr.io/commin/edge-signals:v0.5.1"
 
 # 2. download weights and labelled frames (needs network; resumable and idempotent; SHA256-verified). The VIDEOS are not downloaded: see "Videos" below
 $RUN fetch-assets                                            # or: --url NAME=URL to change a link, --assets-config /assets/my_assets.yaml, --only NAME
+                                                             # restricted container network: docker run --network host ... fetch-assets   (or --dns <resolver>)
 # 3. from here on no network is needed: add --network none to every command below
 
 # 4. tests (the test image adds pytest; it has no weights either, so the tests read /assets)
-docker run --rm --gpus all --shm-size=2g --network none -v $PWD/assets:/assets ghcr.io/commin/edge-signals:v0.5.0-test test
+docker run --rm --gpus all --shm-size=2g --network none -v $PWD/assets:/assets ghcr.io/commin/edge-signals:v0.5.1-test test
 
 # 5. stream on the original videos (your own copy, mounted read-only anywhere): camera replay -> inference -> signals -> adaptation requests
 #    which videos, in which order: configs/replay_order.yaml (default stream drift_calib; or --stream NAME / --split NAME)
 docker run --rm --gpus all --shm-size=2g --network none --user "$(id -u):$(id -g)" -v $PWD/assets:/assets:ro -v $PWD/data:/data:ro -v $PWD/outputs:/outputs \
-     -v /path/to/my/videos:/videos:ro ghcr.io/commin/edge-signals:v0.5.0 stream --videos-dir /videos --stream drift_calib --out /outputs/stream
+     -v /path/to/my/videos:/videos:ro ghcr.io/commin/edge-signals:v0.5.1 stream --videos-dir /videos --stream drift_calib --out /outputs/stream
 # 6. retrain on the labelled frames of the SAME video from before a request, then evaluate and register
 $RUN --network none collect  --out /outputs/run1 --stream-out /outputs/stream --request-id <request id> --images-root /data/frames
 $RUN --network none annotate --out /outputs/run1 --images-root /data/frames

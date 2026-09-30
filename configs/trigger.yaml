@@ -1,4 +1,4 @@
-# Trigger rules (v0.5.0). Every fired rule emits an ADAPTATION REQUEST (screening or confirmation) for the decision layer; a request is
+# Trigger rules (v0.5.1). Every fired rule emits an ADAPTATION REQUEST (screening or confirmation) for the decision layer; a request is
 # evidence, not a retraining decision. Each rule keeps its own state (reference period, anchor, counters, flag history, cooldown).
 # DEMONSTRATION SETTING - see README ("Operating point").
 trigger:
