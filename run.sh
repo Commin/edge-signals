@@ -6,6 +6,7 @@
 #   ./run.sh collect|annotate|retrain|evaluate|register --out RUN ...   adaptation stages (configs/adaptation.yaml)
 #   ./run.sh fetch-assets [--url NAME=URL ...]              download weights / data / videos (SHA256-verified) into $EDGE_ASSETS / $EDGE_DATA
 #   ./run.sh check-alignment --videos-dir D --frames-dir F   decoded video frames vs labelled images
+#   ./run.sh compare-expected --mode images|video --out RUN  requests of a stream run vs configs/expected_results.yaml
 #   ./run.sh prepare-data --config configs/data.yaml       download / lay out the dataset
 #   ./run.sh synthetic-frames --out DIR                    tiny synthetic frames for a smoke test (no dataset needed)
 # Environment: the YOLOv12 fork's own requirements at the pinned commit (docker/install_fork.sh, or the Docker image); PYTHON = the interpreter of that environment;
@@ -26,6 +27,7 @@ case "$cmd" in
                  exec "$PYTHON" -m edge_signals.cli "$cmd" "$@" ;;
   synthetic-frames) exec "$PYTHON" scripts/make_synthetic_frames.py "$@" ;;
   check-alignment) exec "$PYTHON" scripts/check_alignment.py "$@" ;;
+  compare-expected) exec "$PYTHON" scripts/compare_expected.py "$@" ;;
   prepare-data)  exec "$PYTHON" scripts/prepare_data.py "$@" ;;
-  *)             sed -n '2,15p' "$0"; exit 2 ;;
+  *)             sed -n '2,16p' "$0"; exit 2 ;;
 esac

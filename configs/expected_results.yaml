@@ -1,0 +1,27 @@
+# Expected results of `stream --stream drift_calib` for this release (docs/HANDOFF.md section 7). scripts/run_all.sh and `compare-expected` compare a run with this file.
+# The stream is clear_calib -> haze_eval -> nir_eval -> onboard_eval (configs/replay_order.yaml): 21 videos, 2,222 frames at frame stride 5.
+# A difference is a WARNING, not an error: a window whose drop sits right at the threshold can flip between input modes (JPEG frames vs decoded video) and, rarely, between GPUs.
+release: v0.5.2
+stream: drift_calib
+n_frames: 2222
+modes:
+  images:                              # stream --images-dir /data/frames --stream drift_calib   (labelled frames; the calibration was made on these)
+    n_requests: 8
+    requests:                          # clip of each request, in stream order
+      - MVI_1617_VIS
+      - MVI_1448_VIS_Haze
+      - MVI_1526_NIR
+      - MVI_1528_NIR
+      - MVI_1545_NIR
+      - MVI_0790_VIS_OB
+      - MVI_0799_VIS_OB
+      - MVI_0801_VIS_OB
+  video:                               # stream --videos-dir /videos --stream drift_calib        (original videos, every 5th frame)
+    n_requests: 6
+    requests:                          # video and ORIGINAL frame index of each request, in stream order
+      - {video: MVI_1448_VIS_Haze, frame_index: 150}
+      - {video: MVI_1526_NIR, frame_index: 450}
+      - {video: MVI_1528_NIR, frame_index: 450}
+      - {video: MVI_1545_NIR, frame_index: 150}
+      - {video: MVI_0790_VIS_OB, frame_index: 150}
+      - {video: MVI_0801_VIS_OB, frame_index: 300}

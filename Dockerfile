@@ -34,7 +34,7 @@ RUN if [ -n "$DNS" ]; then echo "nameserver $DNS" > /etc/resolv.conf; fi \
 RUN useradd --create-home --uid 10001 app \
  && mkdir -p /assets /data /outputs /home/app/.config/Ultralytics \
  && chown -R app:app /assets /data /outputs /home/app
-ENV EDGE_ASSETS=/assets EDGE_DATA=/data PYTHONNOUSERSITE=1 YOLO_OFFLINE=True HOME=/tmp YOLO_CONFIG_DIR=/tmp/Ultralytics MPLCONFIGDIR=/tmp/matplotlib NO_ALBUMENTATIONS_UPDATE=1
+ENV EDGE_ASSETS=/assets EDGE_DATA=/data PYTHONUNBUFFERED=1 PYTHONNOUSERSITE=1 YOLO_OFFLINE=True HOME=/tmp YOLO_CONFIG_DIR=/tmp/Ultralytics MPLCONFIGDIR=/tmp/matplotlib NO_ALBUMENTATIONS_UPDATE=1
 
 # ---- code (no weights, no data: see .dockerignore)
 FROM base AS code

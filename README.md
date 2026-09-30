@@ -30,11 +30,30 @@ Drive answers with a web page (quota, permission) instead of the file.
 
 ## Quick start
 
+### Run everything with one script
+
+`scripts/run_all.sh` pulls the images, downloads and verifies the assets, runs the test suite, replays the stream `drift_calib` on the labelled images and (if you give it the original videos) on raw video,
+compares the requests with `configs/expected_results.yaml`, and runs the retraining chain on the first request. It prints the exact docker command before every step, shows the output live, keeps it in `<work-dir>/logs/`, and ends
+with a PASS / WARN / SKIP / FAIL line per step. It needs only bash and docker on the host.
+
+```bash
+git clone https://github.com/commin/edge-signals && cd edge-signals          # or just download scripts/run_all.sh
+scripts/run_all.sh --work-dir ./edge-signals-run --videos-dir /path/to/original/videos
+```
+
+Useful options: `--tag v0.5.2` (image version; see below), `--dns <resolver>` or `--network-host` (only the `fetch-assets` container; for hosts where container networking is restricted),
+`--gpus <value>`, `--skip-tests`, `--skip-retrain`, `--no-pull`, `--local-assets DIR` (use asset files you already downloaded instead of the download links). Without `--videos-dir` the raw-video mode is skipped with a notice.
+A difference from the expected requests is only a warning: a window whose drop sits right at the threshold can flip between input modes and between GPUs.
+
+**Image tags.** `:latest` (and `:latest-test`) always point to the newest release. For experiments pin a version tag (`:v0.5.2`), so that the code, the expected results and the assets stay together.
+
+### Run step by step
+
 ```bash
 # 1. pull the image (runtime and test targets; no weights or data inside) and prepare three host directories
-docker pull ghcr.io/commin/edge-signals:v0.5.1
+docker pull ghcr.io/commin/edge-signals:v0.5.2
 mkdir -p assets data outputs && chmod 777 outputs            # the container runs as uid 10001
-RUN="docker run --rm --gpus all --shm-size=2g -v $PWD/assets:/assets -v $PWD/data:/data -v $PWD/outputs:/outputs ghcr.io/commin/edge-signals:v0.5.1"
+RUN="docker run --rm --gpus all --shm-size=2g -v $PWD/assets:/assets -v $PWD/data:/data -v $PWD/outputs:/outputs ghcr.io/commin/edge-signals:v0.5.2"
 
 # 2. download weights and labelled frames (needs network; resumable and idempotent; SHA256-verified). The VIDEOS are not downloaded: see "Videos" below
 $RUN fetch-assets                                            # or: --url NAME=URL to change a link, --assets-config /assets/my_assets.yaml, --only NAME
@@ -42,12 +61,12 @@ $RUN fetch-assets                                            # or: --url NAME=UR
 # 3. from here on no network is needed: add --network none to every command below
 
 # 4. tests (the test image adds pytest; it has no weights either, so the tests read /assets)
-docker run --rm --gpus all --shm-size=2g --network none -v $PWD/assets:/assets ghcr.io/commin/edge-signals:v0.5.1-test test
+docker run --rm --gpus all --shm-size=2g --network none -v $PWD/assets:/assets ghcr.io/commin/edge-signals:v0.5.2-test test
 
 # 5. stream on the original videos (your own copy, mounted read-only anywhere): camera replay -> inference -> signals -> adaptation requests
 #    which videos, in which order: configs/replay_order.yaml (default stream drift_calib; or --stream NAME / --split NAME)
 docker run --rm --gpus all --shm-size=2g --network none --user "$(id -u):$(id -g)" -v $PWD/assets:/assets:ro -v $PWD/data:/data:ro -v $PWD/outputs:/outputs \
-     -v /path/to/my/videos:/videos:ro ghcr.io/commin/edge-signals:v0.5.1 stream --videos-dir /videos --stream drift_calib --out /outputs/stream
+     -v /path/to/my/videos:/videos:ro ghcr.io/commin/edge-signals:v0.5.2 stream --videos-dir /videos --stream drift_calib --out /outputs/stream
 # 6. retrain on the labelled frames of the SAME video from before a request, then evaluate and register
 $RUN --network none collect  --out /outputs/run1 --stream-out /outputs/stream --request-id <request id> --images-root /data/frames
 $RUN --network none annotate --out /outputs/run1 --images-root /data/frames
@@ -283,7 +302,7 @@ No annotations are read anywhere in `edge_signals/`. The threshold `delta` is la
 ## Layout
 
 ```
-run.sh  README.md  docs/HANDOFF.md (integration handoff)  LICENSE (placeholder)  NOTICE  requirements-test.txt  Dockerfile  .dockerignore  .gitignore
+run.sh  README.md  docs/HANDOFF.md (integration handoff)  scripts/run_all.sh (run everything)  LICENSE (placeholder)  NOTICE  requirements-test.txt  Dockerfile  .dockerignore  .gitignore
 configs/     inference.yaml  signals.yaml  trigger.yaml  adaptation.yaml  assets.yaml  replay_order.yaml  data.yaml
 edge_signals/  base registry config windows trigger healthy engine inference streams video replay assets cli  adapt/{collect,annotate,retrain,evaluate,register,streamref,switch,metrics,common}  builtin/{consistency,confidence,platform_motion,feature_drift}
 third_party/consistency/   the released package (code, tests, fixtures) + VENDORED.txt + FILES.sha256

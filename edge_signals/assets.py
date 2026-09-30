@@ -86,7 +86,7 @@ def drive_confirmation(page: str, file_id: str) -> Optional[str]:
 # ---------------------------------------------------------------- download
 CONNECT_TIMEOUT, READ_TIMEOUT = 15, 60            # seconds: connecting, and waiting for the next bytes
 NET_CHUNK = 1 << 16                               # bytes per network read: a stalled connection loses at most this much of the partial file
-PROGRESS_EVERY = 10.0                             # a progress line at least every 10 s while a file downloads
+PROGRESS_EVERY = float(os.environ.get("EDGE_PROGRESS_EVERY", "10"))   # seconds between progress lines: at least every 10 s (the environment variable is for tests)
 NET_HINT = ("no network or DNS in the container? run fetch-assets with --network host or with --dns <resolver> (the other commands run with --network none)")
 
 

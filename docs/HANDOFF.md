@@ -1,8 +1,13 @@
 # edge_signals — handoff for the QUICK integration
 
 > **Status.** Verified by a fresh test of the **public v0.5.0 images** (anonymous pull, real Google Drive downloads, 119 tests, requests 8 with labelled images and 6 with raw video as in section 7, and the retraining chain).
-> v0.5.1 changes only the downloader (timeouts, progress lines, Drive web-page error), the stream progress lines and summary fields, tests and documentation; the same steps were re-run on the v0.5.1 images
-> (130 tests, requests 8 / 6, retraining chain, all 12 SHA256s).
+> Since then only the downloader (timeouts, progress lines, Drive web-page error), the stream progress lines and summary fields, `scripts/run_all.sh`, tests and documentation changed. The same steps were re-run with
+> `scripts/run_all.sh` on the v0.5.2 images, once with and once without the original videos (141 tests, requests 8 / 6 exactly as in section 7, all SHA256s, retraining chain).
+
+## 0. One command
+
+`scripts/run_all.sh` does sections 3 to 9 below for you (pull, fetch-assets, tests, both stream modes, comparison with `configs/expected_results.yaml`, retraining chain): `scripts/run_all.sh --work-dir ./edge-signals-run --videos-dir /path/to/videos`.
+It prints every docker command before it runs it, so its output is a transcript of this file. The sections below describe the same steps one by one.
 
 ## 1. What this is
 
@@ -10,8 +15,8 @@
 
 | Item | Where |
 |---|---|
-| Code | `https://github.com/commin/edge-signals`, tag `v0.5.1`; licence GPL-3.0-only |
-| Container image | `ghcr.io/commin/edge-signals:v0.5.1` (public); test image `ghcr.io/commin/edge-signals:v0.5.1-test` |
+| Code | `https://github.com/commin/edge-signals`, tag `v0.5.2`; licence GPL-3.0-only |
+| Container image | `ghcr.io/commin/edge-signals:v0.5.2` (public); test image `ghcr.io/commin/edge-signals:v0.5.2-test` |
 | Model weights, labelled frames and labels | Google Drive, shared "anyone with the link" (ids and SHA256 in `configs/assets.yaml`); `yolov12n.pt` from the official YOLOv12 release |
 | Original videos | from the SMD dataset's official page (see section 4) |
 
@@ -26,12 +31,12 @@ Nothing heavy is inside the repository or the image: no weights, no data, no vid
 ## 3. Pull the image and fetch the assets
 
 ```bash
-docker pull ghcr.io/commin/edge-signals:v0.5.1
+docker pull ghcr.io/commin/edge-signals:v0.5.2
 
 mkdir -p assets data outputs
 docker run --rm --user "$(id -u):$(id -g)" \
   -v "$PWD/assets:/assets" -v "$PWD/data:/data" \
-  ghcr.io/commin/edge-signals:v0.5.1 fetch-assets
+  ghcr.io/commin/edge-signals:v0.5.2 fetch-assets
 ```
 
 `fetch-assets` prints a progress line at least every 10 s per file, gives up after 15 s without a connection or 60 s without data (the error names the host and the likely cause; a partial file is resumed on the next run), and stops with the file id if Google Drive returns a web page (quota, permission) instead of the file. It downloads the two model weights, `yolov12n.pt` (the file the trainer's AMP self-check needs) and the labelled frames and labels (9 archives). Every file is checked against its SHA256 and its size. It is safe to re-run: finished files are skipped (`up_to_date`).
@@ -57,10 +62,10 @@ You do not need every video. `configs/replay_order.yaml` lists the 63 videos use
 ```bash
 docker run --rm --user "$(id -u):$(id -g)" --gpus all \
   -v "$PWD/assets:/assets" -v "$PWD/data:/data" \
-  ghcr.io/commin/edge-signals:v0.5.1-test test
+  ghcr.io/commin/edge-signals:v0.5.2-test test
 ```
 
-Expected: `130 passed` (about one minute on one GPU). The tests need `/assets` (weights); `/data` is optional.
+Expected: `141 passed` (about one minute on one GPU). The tests need `/assets` (weights); `/data` is optional.
 
 ## 6. Replay a stream — two input modes
 
@@ -78,7 +83,7 @@ The same detector, signals and trigger run on either input:
 ```bash
 docker run --rm --user "$(id -u):$(id -g)" --gpus all --shm-size=2g --network none \
   -v "$PWD/assets:/assets" -v "$PWD/data:/data" -v "$PWD/outputs:/outputs" \
-  ghcr.io/commin/edge-signals:v0.5.1 \
+  ghcr.io/commin/edge-signals:v0.5.2 \
   stream --images-dir /data/frames --stream drift_calib --out /outputs/drift_calib_images
 ```
 
@@ -88,7 +93,7 @@ docker run --rm --user "$(id -u):$(id -g)" --gpus all --shm-size=2g --network no
 docker run --rm --user "$(id -u):$(id -g)" --gpus all --shm-size=2g --network none \
   -v "$PWD/assets:/assets" -v "$PWD/data:/data" \
   -v "$PWD/videos:/videos:ro" -v "$PWD/outputs:/outputs" \
-  ghcr.io/commin/edge-signals:v0.5.1 \
+  ghcr.io/commin/edge-signals:v0.5.2 \
   stream --videos-dir /videos --stream drift_calib --out /outputs/drift_calib_video
 ```
 
@@ -125,7 +130,7 @@ For `--stream drift_calib` (21 videos, 2,222 frames, about 1 minute on one GPU i
 
 For the same reason, small numeric differences between GPUs can move a window that sits right at the threshold.
 
-> These numbers are from `v0.5.1`. Update them if the threshold is recalibrated.
+> These numbers are from `v0.5.2`. Update them if the threshold is recalibrated.
 
 ## 8. Reading an AdaptationRequest
 
@@ -149,7 +154,7 @@ These steps run on the cloud side, one command each. They need a **raw-video** s
 
 ```bash
 RUN="docker run --rm --user $(id -u):$(id -g) --gpus all --shm-size=2g --network none \
-  -v $PWD/assets:/assets -v $PWD/data:/data -v $PWD/outputs:/outputs ghcr.io/commin/edge-signals:v0.5.1"
+  -v $PWD/assets:/assets -v $PWD/data:/data -v $PWD/outputs:/outputs ghcr.io/commin/edge-signals:v0.5.2"
 RID=step-consistency-9; O=/outputs/adapt/$RID
 
 $RUN collect  --out $O --stream-out /outputs/drift_calib_video --request-id $RID --images-root /data/frames
@@ -196,8 +201,8 @@ The URLs can be overridden at run time (`fetch-assets --url NAME=URL` or a mount
 
 | Item | Value |
 |---|---|
-| Code tag | `v0.5.1` |
-| Image | `ghcr.io/commin/edge-signals:v0.5.1`; the registry digest exists after the push: `docker inspect --format '{{index .RepoDigests 0}}' ghcr.io/commin/edge-signals:v0.5.1` |
+| Code tag | `v0.5.2` |
+| Image | `ghcr.io/commin/edge-signals:v0.5.2`; the registry digest exists after the push: `docker inspect --format '{{index .RepoDigests 0}}' ghcr.io/commin/edge-signals:v0.5.2` |
 | YOLOv12 fork | pinned commit `2abab7153a065fb2925e8088e9ca2b19016ab7d6` (`docker/install_fork.sh`, `configs/inference.yaml`) |
 | Consistency package | vendored at commit `78c4cde` (`third_party/consistency/VENDORED.txt`) |
 | Asset checksums | `configs/assets.yaml` |
