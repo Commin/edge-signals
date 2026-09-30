@@ -1,0 +1,39 @@
+# Trigger rules (v0.5.0). Every fired rule emits an ADAPTATION REQUEST (screening or confirmation) for the decision layer; a request is
+# evidence, not a retraining decision. Each rule keeps its own state (reference period, anchor, counters, flag history, cooldown).
+# DEMONSTRATION SETTING - see README ("Operating point").
+trigger:
+  healthy_changes: references/healthy_changes.5d9a8bbffce317d5.npz   # the healthy change distribution delta was derived from (p-values in requests); records frame_stride 5
+  evidence: {windows: 12, flag_rule: step}                            # flag rate reported in every request (1 min at 5 s windows)
+  rules:
+    step:                             # screening: a drop between neighbouring windows
+      type: relative_drop
+      enabled: true
+      stage: screening
+      comparator: previous
+      # delta = 0.080. Derived label-free: minus the 5th percentile of the window-to-window change of the consistency window
+      # median (30 transitions = 5 s), measured within videos on held-out healthy footage (50 windows from 27 videos; every
+      # video was predicted by a model that had not trained on it). I.e. 5 % of healthy windows drop by more than delta.
+      # Re-derive it for another model, camera or window setting (edge_signals/healthy.py).
+      delta: 0.080
+      n_consecutive: 1
+      cooldown_windows: 0
+    rate:                             # confirmation: at least k of the last M windows met the step rule's CONDITION (flagged), whether or not step fired
+      type: rate                      # available, disabled: not evaluable on the short healthy streams used for v0.2; calibrate M and k on long streams
+      enabled: false
+      stage: confirmation
+      flag_rule: step                 # the flag condition = step's comparator and delta
+      windows: 12                     # M = 1 minute
+      min_flagged: 3                  # k
+      cooldown_windows: 0
+    sustained:                        # confirmation, available but disabled: the level stays below its own anchor for N windows in a row
+      type: relative_drop
+      enabled: false
+      stage: confirmation
+      comparator: anchor              # anchor = the window after this rule's last fire (or the stream start)
+      delta: 0.079                    # derived the same way from the change against the anchor
+      n_consecutive: 2                # 3 is the stricter variant
+      cooldown_windows: 0
+    critical:   {enabled: false, priority: 4}      # the four prioritised types are hooks and must stay disabled
+    cumulative: {enabled: false, priority: 3}
+    preventive: {enabled: false, priority: 2}
+    periodic:   {enabled: false, priority: 1}

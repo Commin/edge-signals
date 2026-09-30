@@ -1,0 +1,466 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "local_signal_event",
+  "description": "One line of signals.jsonl (SignalValue), windows.jsonl (WindowStat), requests.jsonl (AdaptationRequest) context.jsonl (ContextEvent) or frames.jsonl (FrameLog: one line per processed frame). An invalid value is never written as a number: value is null and valid is false. An adaptation request is evidence for the decision layer; it is not a retraining decision.",
+  "oneOf": [
+    {
+      "$ref": "#/definitions/SignalValue"
+    },
+    {
+      "$ref": "#/definitions/WindowStat"
+    },
+    {
+      "$ref": "#/definitions/AdaptationRequest"
+    },
+    {
+      "$ref": "#/definitions/ContextEvent"
+    },
+    {
+      "$ref": "#/definitions/FrameLog"
+    }
+  ],
+  "definitions": {
+    "SignalValue": {
+      "type": "object",
+      "required": [
+        "signal",
+        "version",
+        "value",
+        "valid",
+        "invalid_reason",
+        "t",
+        "device_id",
+        "model_version",
+        "reference_id"
+      ],
+      "properties": {
+        "signal": {
+          "type": "string",
+          "description": "signal name, e.g. consistency"
+        },
+        "version": {
+          "type": "string",
+          "description": "signal implementation version (consistency: cell name and package commit)"
+        },
+        "value": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "null when valid is false"
+        },
+        "valid": {
+          "type": "boolean"
+        },
+        "invalid_reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "why the value is invalid, e.g. EMPTY_PAIR, no_boxes, no_features, no_reference, backbone_mismatch"
+        },
+        "t": {
+          "type": "number",
+          "description": "stream time in seconds (time of the second frame for a pair)"
+        },
+        "device_id": {
+          "type": "string"
+        },
+        "model_version": {
+          "type": "string"
+        },
+        "reference_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "hash id of the reference bundle used, null for signals without a reference"
+        },
+        "granularity": {
+          "enum": [
+            "frame",
+            "pair",
+            "window"
+          ]
+        },
+        "frame_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "extras": {
+          "type": "object",
+          "description": "signal-specific fields; consistency: alarm, status, G, G_mc, dx, dy, K, N_t, N_t1; platform_motion: dx, dy, abs_dx, abs_dy, status; confidence: n_boxes; feature_drift: bn_stats_match"
+        }
+      }
+    },
+    "WindowStat": {
+      "type": "object",
+      "required": [
+        "kind",
+        "signal",
+        "window_id",
+        "statistic",
+        "valid",
+        "reference_kind",
+        "reference",
+        "change",
+        "aggregator",
+        "window_transitions"
+      ],
+      "properties": {
+        "kind": {
+          "const": "window"
+        },
+        "signal": {
+          "type": "string"
+        },
+        "window_id": {
+          "type": "integer"
+        },
+        "clip_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "t_start": {
+          "type": "number"
+        },
+        "t_end": {
+          "type": "number"
+        },
+        "n_items": {
+          "type": "integer"
+        },
+        "n_valid": {
+          "type": "integer"
+        },
+        "statistic": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "aggregate of the valid values of the window; null if too few are valid"
+        },
+        "valid": {
+          "type": "boolean"
+        },
+        "invalid_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reference_kind": {
+          "enum": [
+            "previous",
+            "anchor",
+            "rolling",
+            "reference"
+          ]
+        },
+        "reference": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "change": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "degradation against the reference period: > 0 means worse (difference or ratio form)"
+        },
+        "change_kind": {
+          "enum": [
+            "difference",
+            "ratio"
+          ]
+        },
+        "aggregator": {
+          "enum": [
+            "mean",
+            "median",
+            "worst10"
+          ]
+        },
+        "window_transitions": {
+          "type": "integer"
+        },
+        "higher_is_healthier": {
+          "type": "boolean"
+        },
+        "model_version": {
+          "type": "string"
+        },
+        "device_id": {
+          "type": "string"
+        },
+        "reference_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "window_seconds": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "window length in seconds (window_transitions / frame rate), when the frame rate is known"
+        },
+        "comparisons": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "every registered comparator of this signal (the signal's own and those requested by trigger rules): key -> {reference, change, reason}"
+        }
+      }
+    },
+    "ContextEvent": {
+      "type": "object",
+      "required": [
+        "kind",
+        "t"
+      ],
+      "properties": {
+        "kind": {
+          "const": "scene_cut",
+          "description": "replay only: the clip changed; no pair is formed across it"
+        },
+        "t": {
+          "type": "number"
+        },
+        "from_clip": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "to_clip": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "frame_id": {
+          "type": "string"
+        },
+        "device_id": {
+          "type": "string"
+        }
+      }
+    },
+    "AdaptationRequest": {
+      "type": "object",
+      "required": [
+        "kind",
+        "request_id",
+        "stage",
+        "rule",
+        "rule_type",
+        "signal",
+        "window_id",
+        "t",
+        "comparator",
+        "statistic_before",
+        "statistic_after",
+        "drop",
+        "delta",
+        "p_value",
+        "flag_rate",
+        "context",
+        "p_value_floor",
+        "robust_z"
+      ],
+      "properties": {
+        "kind": {
+          "const": "adaptation_request"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "stage": {
+          "enum": [
+            "screening",
+            "confirmation"
+          ],
+          "description": "screening = an early, sensitive rule (step); confirmation = a rule that needs more evidence (rate, sustained)"
+        },
+        "rule": {
+          "type": "string",
+          "description": "name of the rule that fired (e.g. step, sustained, rate); every rule that fires emits its own request"
+        },
+        "rule_type": {
+          "enum": [
+            "relative_drop",
+            "rate"
+          ]
+        },
+        "signal": {
+          "type": "string"
+        },
+        "window_id": {
+          "type": "integer"
+        },
+        "clip_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "t": {
+          "type": "number"
+        },
+        "comparator": {
+          "type": "string",
+          "description": "reference period the drop is measured against (for a rate rule: the flag condition's comparator)"
+        },
+        "statistic_before": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "the reference period's level (previous window / anchor)"
+        },
+        "statistic_after": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "this window's statistic"
+        },
+        "drop": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "degradation, > 0 = worse (difference or ratio form, see drop_kind)"
+        },
+        "drop_kind": {
+          "enum": [
+            "difference",
+            "ratio"
+          ]
+        },
+        "delta": {
+          "type": "number",
+          "description": "threshold of the drop (for a rate rule: the flag condition's delta)"
+        },
+        "n_consecutive": {
+          "type": "integer"
+        },
+        "cooldown_windows": {
+          "type": "integer"
+        },
+        "p_value": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "empirical p-value of the drop against the healthy change distribution that delta was derived from: (1 + #healthy drops >= this drop) / (n + 1); null if no distribution is configured"
+        },
+        "p_value_note": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "flag_rate": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "over the last evidence windows: windows, flagged (windows whose flag condition held), rate, healthy_flag_probability (share of healthy windows that would be flagged) and binomial_p (P(at least this many flags | healthy))"
+        },
+        "context": {
+          "type": "object",
+          "description": "latest window statistic and latest value of every measured signal other than the firing one (e.g. confidence, feature_drift, platform_motion). Context only: no rule reads it."
+        },
+        "model_version": {
+          "type": "string"
+        },
+        "device_id": {
+          "type": "string"
+        },
+        "p_value_floor": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "smallest possible p-value, 1 / (n_healthy + 1); a p-value equal to it means the drop is at least as large as every healthy drop, so p cannot say how much larger"
+        },
+        "robust_z": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "drop / (1.4826 x MAD of the healthy change distribution): the size of the drop in robust standard deviations of healthy changes; unlike p it does not saturate"
+        },
+        "robust_z_note": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "video": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "video input: the video the request was raised in (the window's last frame); null for image input"
+        },
+        "frame_index": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "video input: ORIGINAL frame index (0-based decode order) of that frame; null for image input"
+        }
+      }
+    },
+    "FrameLog": {
+      "type": "object",
+      "required": [
+        "frame_id",
+        "t"
+      ],
+      "properties": {
+        "frame_id": {
+          "type": "string",
+          "description": "images: the file stem; videos: <video>@<original frame index, 7 digits>"
+        },
+        "t": {
+          "type": "number",
+          "description": "stream time in seconds (index of the processed frame / effective fps)"
+        },
+        "clip_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "video": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "frame_index": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "ORIGINAL frame index in the video"
+        },
+        "n_boxes": {
+          "type": "integer"
+        }
+      }
+    }
+  }
+}

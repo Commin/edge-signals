@@ -1,0 +1,10 @@
+# Dataset preparation (the images are not shipped: the licence is unresolved).
+# Give ONE of: source.url (an archive to download) or source.local_dir (an already downloaded copy).
+source:
+  url: null                    # e.g. an https:// location of the archive (zip / tar / tar.gz)
+  sha256: null                 # expected sha256 of the archive (verified when set)
+  local_dir: null              # alternatively: a folder that already holds the frames
+target_dir: data/frames        # frames are written here as <clip>-<7-digit index>.jpg
+input_name_regex: '^(?P<clip>.+?)_frame(?P<n>\d+)'   # how a source file name encodes clip and frame number
+reindex: true                  # renumber the frames of each clip consecutively from 0 (numeric order of the source numbers)
+frame_lists: [data/splits/clear_train.txt, data/splits/clear_val.txt]   # every stem listed here must exist afterwards

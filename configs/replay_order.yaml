@@ -1,0 +1,26 @@
+# Replay order: which original videos are replayed, and in which order. Metadata only (video codes); no video is in the repository.
+#
+# ORDERING RULE. splits.<name> lists the video codes of a split of the labelled image dataset in the order in which the videos FIRST appear in that
+# split's list file (the list files are ordered by video code, then frame index). A video code is the file stem of the original SMD video
+# (e.g. MVI_0788_VIS_OB); `stream --videos-dir` finds the file by that code (exact stem, else a stem that contains it; ambiguity = missing).
+# streams.<name> is an ordered concatenation of splits; every video of a split is replayed once, in the order below. Windows never cross videos.
+#
+# The video files themselves are NOT part of this package: point --videos-dir at your own copy of the original SMD videos (see README).
+
+splits:
+  clear_train: [MVI_1469_VIS, MVI_1481_VIS, MVI_1484_VIS, MVI_1486_VIS, MVI_1609_VIS, MVI_1613_VIS, MVI_1614_VIS, MVI_1615_VIS, MVI_1619_VIS, MVI_1620_VIS, MVI_1623_VIS, MVI_1624_VIS, MVI_1625_VIS, MVI_1626_VIS, MVI_1640_VIS, MVI_1644_VIS, MVI_1645_VIS, MVI_1646_VIS]
+  clear_val: [MVI_1478_VIS, MVI_1479_VIS, MVI_1482_VIS, MVI_1622_VIS, MVI_1627_VIS]
+  clear_calib: [MVI_1474_VIS, MVI_1610_VIS, MVI_1612_VIS, MVI_1617_VIS]
+  clear_test: [MVI_1578_VIS, MVI_1582_VIS, MVI_1583_VIS, MVI_1584_VIS, MVI_1587_VIS, MVI_1592_VIS]
+  nir_adapt: [MVI_1463_NIR, MVI_1468_NIR, MVI_1520_NIR, MVI_1521_NIR, MVI_1522_NIR, MVI_1529_NIR, MVI_1530_NIR, MVI_1538_NIR, MVI_1539_NIR, MVI_1548_NIR, MVI_1550_NIR, MVI_1551_NIR]
+  nir_eval: [MVI_1523_NIR, MVI_1524_NIR, MVI_1525_NIR, MVI_1526_NIR, MVI_1527_NIR, MVI_1528_NIR, MVI_1532_NIR, MVI_1541_NIR, MVI_1545_NIR, MVI_1552_NIR]
+  haze_eval: [MVI_1448_VIS_Haze, MVI_1451_VIS_Haze, MVI_1452_VIS_Haze]
+  onboard_eval: [MVI_0790_VIS_OB, MVI_0797_VIS_OB, MVI_0799_VIS_OB, MVI_0801_VIS_OB]
+  nir_haze_eval: [MVI_0895_NIR_Haze]
+
+default_stream: drift_calib
+
+streams:
+  drift_calib: [clear_calib, haze_eval, nir_eval, onboard_eval]     # clean reference -> haze -> near infrared -> on-board camera
+  drift_test: [clear_test, haze_eval]                              # held-out clear videos, then haze
+  negative_control: [clear_test]                                   # held-out clear videos only: no request is expected

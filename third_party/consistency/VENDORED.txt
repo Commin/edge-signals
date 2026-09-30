@@ -1,0 +1,7 @@
+Vendored unchanged (code, tests and test fixtures) from the released package:
+  repository : https://github.com/Commin/consistency
+  branch     : main
+  commit     : 78c4cdedf2457058c7ae00f0494014dffea49dfc
+  locked cell: Gmc-full-1ch-incl
+The package README and CHANGELOG are not copied. FILES.sha256 lists every vendored file (sha256).
+Reference test: PYTHONPATH=third_party/consistency python -m pytest third_party/consistency/tests

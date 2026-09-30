@@ -1,0 +1,22 @@
+{
+  "backbone_params_id": "fead5b0154a6bf8dad31cb2f8978cbeb268d69899f7c8ed0f7d3139a043ae52c",
+  "backbone_state_id": "ed1f23fdbde93355312df2a259dd077151d4d9882839520cb33e236f6a32bc72",
+  "explained_variance_ratio": 0.8317349531338675,
+  "feature_dim": 512,
+  "hook_layer": 8,
+  "hook_output_shape": [
+    512,
+    12,
+    20
+  ],
+  "n_clips": 23,
+  "n_frames": 2370,
+  "pca_dims": 32,
+  "pooling": "global average over spatial positions",
+  "reference_distance_median": 5.4567856583127705,
+  "reference_distance_p95": 7.057180716073886,
+  "reference_id": "343ece147e9b529d",
+  "shrinkage": 0.0070159599561810835,
+  "signal": "feature_drift",
+  "valid_for": "every model version whose learnable backbone weights are identical (backbone_params_id; frozen in adaptation). BatchNorm running statistics are NOT frozen by fine-tuning: a version with a different backbone_state_id shares the parameters but its features are shifted slightly (logged as bn_stats_match = false)."
+}

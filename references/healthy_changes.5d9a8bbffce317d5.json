@@ -1,0 +1,13 @@
+{
+  "aggregator": "median",
+  "change": "difference",
+  "fps": 6.0,
+  "frame_stride": 5,
+  "n_videos": 27,
+  "n_windows_anchor": 50,
+  "n_windows_previous": 50,
+  "note": "degradation (> 0 = worse) of every within-video window against the previous window and against the anchor; delta = the 95th percentile",
+  "reference_id": "5d9a8bbffce317d5",
+  "signal": "consistency",
+  "window_transitions": 30
+}

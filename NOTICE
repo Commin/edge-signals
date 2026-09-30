@@ -1,0 +1,26 @@
+edge_signals - licence and third-party notices
+
+This project (edge_signals, https://github.com/commin/edge-signals) is licensed under the GNU General Public License, version 3 (see LICENSE).
+No model weights, dataset, frame, label archive or video are part of this repository or of its container images. Weights and labelled frames are downloaded at run
+time by `fetch-assets` (SHA256-verified, see configs/assets.yaml); the original videos are obtained by the user from the dataset's official page.
+
+1. YOLOv12 (fork of Ultralytics YOLO) - installed in the container image, NOT included in this repository, NOT modified
+   Source: https://github.com/sunsmarterjie/yolov12   pinned commit 2abab7153a065fb2925e8088e9ca2b19016ab7d6
+   Licence: GNU AGPL-3.0 (see the LICENSE file of that repository). It is fetched from that URL and commit at image build time (docker/install_fork.sh) together with its own
+   requirements (torch, torchvision, flash-attn, timm, albumentations, onnx, gradio, supervision, ...), all unmodified. The AGPL-3.0 source of the installed version is the commit above.
+   YOLOv12: Tian, Y., Ye, Q., Doermann, D. "YOLOv12: Attention-Centric Real-Time Object Detectors", arXiv:2502.12524 (2025).
+
+2. consistency - vendored unchanged in third_party/consistency/
+   Source: https://github.com/Commin/consistency   commit 78c4cdedf2457058c7ae00f0494014dffea49dfc (see third_party/consistency/VENDORED.txt and FILES.sha256)
+   Its upstream repository ships an empty LICENSE file; it is included here as part of this GPL-3.0 project by the same author.
+
+3. Dataset: Singapore Maritime Dataset (SMD) - NOT included
+   Official page: https://sites.google.com/site/dilipprasad/home/singapore-maritime-dataset   (VIS On-Shore, VIS On-Board and NIR On-Shore video archives)
+   The labelled frames and single-class labels downloaded by fetch-assets derive from the SMD; the stream stage reads the original SMD videos, which are not distributed here. Both
+   remain subject to the dataset's own licence and terms, which you must comply with.
+   Citation: D. K. Prasad, D. Rajan, L. Rachmawati, E. Rajabally, and C. Quek, "Video Processing from Electro-optical Sensors for Object Detection and Tracking in Maritime
+   Environment: A Survey," IEEE Transactions on Intelligent Transportation Systems, vol. 18, no. 8, pp. 1993-2016, 2017.
+
+4. Model weights - NOT included, downloaded at run time
+   maritime_s_base and maritime_x_base were fine-tuned from the official YOLOv12 COCO weights (https://github.com/sunsmarterjie/yolov12/releases/tag/turbo, AGPL-3.0)
+   on SMD-derived data; they are hosted on Google Drive (configs/assets.yaml). yolov12n.pt is the official release file, downloaded from its official URL.

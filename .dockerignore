@@ -1,0 +1,15 @@
+.git
+.gitignore
+outputs
+assets
+data/frames
+data/labels
+data/lists
+data/videos
+__pycache__
+**/__pycache__
+*.pyc
+*.pt
+.pytest_cache
+.venv
+docs

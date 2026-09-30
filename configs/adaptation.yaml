@@ -1,0 +1,66 @@
+# Adaptation stages: collect -> annotate -> retrain -> evaluate -> register. Every stage writes only to --out (the run directory).
+# $EDGE_ASSETS (weights) and $EDGE_DATA (data, videos) are the /assets and /data volumes; they are filled by `fetch-assets`. Override any value with --set key=value.
+image_size_px: [1920, 1080]
+
+# DEFAULT RECIPE = "provided200": the ground-truth labels of the collected frames (SIMULATED annotation: in a deployment a person or a service labels them) + replay 200 %.
+# Why not pseudo-labels by default: in same-video retraining the teacher can be WEAKER than the student on the current scene. Example (request at MVI_1526_NIR frame 450): the teacher
+# found only 69 % of the objects of the collected frames (precision 0.77); the student retrained on those labels then found 41 of 87 objects on the later frames of that video, against
+# 86 with the provided labels and 65 for the base model (mAP50 0.21 / 0.98 / 0.65). The earlier default "pseudo200" was chosen in a different setting (adaptation set nir_adapt, evaluated
+# on nir_eval, 3 seeds: mean loss on haze + onboard provided50 +0.211, provided200 +0.062, pseudo200 -0.007) and does not carry over to retraining on the video that has just been seen.
+# "pseudo" stays an option (annotate --mode pseudo). FAILURE CONDITION: pseudo-labels help only when the teacher is stronger than the student on the CURRENT data; check the
+# pseudo-label precision / recall that `annotate` reports when ground truth is available (--check-labels-dir), and do not use it when the teacher is weak on the scene.
+# It is a demonstration recipe from small experiments, not a validated default (see README).
+collect:
+  replay:                              # already-annotated frames replayed next to the new ones, drawn without replacement
+    lists: [$EDGE_DATA/lists/clear_train.txt, $EDGE_DATA/lists/clear_val.txt]      # frame lists of the already-annotated training frames (data assets)
+    ratio: 2.0                         # replay frames = ratio x adaptation frames (provided200: 200 %)
+    seed: 0
+  min_new_frames: 60                   # same-video collection: fewer new labelled frames than this -> 'insufficient data', no retraining (60 = 10 s at 6 fps; a demonstration value)
+
+annotate:
+  mode: provided                       # provided = existing labels (simulated annotation; the default) | pseudo = teacher predictions (only when the teacher is stronger than the student on the current data)
+  provided:
+    labels_dir: $EDGE_DATA/labels      # <frame>.txt in YOLO format (class 0 = vessel); a data asset
+    delay_s_fixed: 0.0                 # injected annotation delay (logged; nothing sleeps)
+    delay_s_per_frame: 0.0
+  replay_labels_dir: null              # default: provided.labels_dir
+  pseudo:
+    teacher_weights: $EDGE_ASSETS/weights/maritime_x_base.pt     # a weights asset (downloaded by fetch-assets), not in the image
+    conf: 0.5
+    iou: 0.7
+    imgsz: 640
+    device: auto
+
+retrain:
+  base: $EDGE_ASSETS/weights/maritime_s_base.pt     # the active model
+  amp_check_weights: $EDGE_ASSETS/weights/yolov12n.pt   # the trainer's AMP self-check looks for this file (an asset; no download at run time)
+  recipe:
+    freeze: 9                          # leading layers frozen: 9 = the backbone
+    epochs: 10
+    mosaic: 1.0
+    close_mosaic: 0                    # MUST be set explicitly; 0 = mosaic stays on for the whole retrain
+    imgsz: 640
+    batch: 16
+    optimizer: auto
+    seed: 0
+    workers: 8
+    deterministic: true
+    device: auto                       # auto = GPU 0 if available, else CPU
+    patience: 1000                     # no early stopping (val is off; the last epoch is kept)
+    augment: {hsv_h: 0.03, hsv_s: 0.9, hsv_v: 0.6}          # photometric augmentation (R3)
+    albumentations:                    # replaces the fork's hidden Blur / MedianBlur / ToGray / CLAHE (verified off in the log)
+      - {name: RandomBrightnessContrast, brightness_limit: 0.25, contrast_limit: 0.25, p: 0.5}
+
+evaluate:
+  map_conf: 0.001                      # offline mAP (LABEL-REQUIRED) predictions
+  map_iou: 0.7
+  max_det: 300
+  imgsz: 640
+  device: auto
+  recall_conf: 0.25
+  size_bins_px: [32, 96]
+  proxy_conf: 0.25                     # label-free proxy: deployment confidence
+  proxy_window_transitions: 30
+
+registry:
+  path: registry.json                  # relative to --out

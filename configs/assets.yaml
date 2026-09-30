@@ -1,0 +1,110 @@
+# Runtime assets: nothing here is in the repository or in the image. One entry per asset: name, kind (weights | reference | data | video), url, sha256, size_bytes, target.
+# `url`: weights and labelled frames are on Google Drive (shared with "anyone with the link", `gdrive:<file id>`); yolov12n.pt is the official YOLOv12 release file. Override with
+# `fetch-assets --url NAME=URL` or a mounted copy of this file (--assets-config). Google Drive links (https://drive.google.com/file/d/<id>/view or gdrive:<id>) and file:// urls are accepted. target: $EDGE_ASSETS (weights) and $EDGE_DATA (data, videos) are the
+# /assets and /data volumes in the container. The original SMD videos are NOT assets: pass your own copy with `stream --videos-dir` (see README and NOTICE).
+assets:
+- name: maritime_s_base
+  kind: weights
+  url: gdrive:1rOEoRjHMhB25bzecYxzhKe9pl6CoVqYL
+  sha256: c8db34953b4ddb2791942f65f85f77294c4a36bcf531d75720fb4b75972d0c4d
+  size_bytes: 18627196
+  target: $EDGE_ASSETS/weights/maritime_s_base.pt
+  extract: false
+  note: the edge detector (single class 'vessel'); clean checkpoint metadata
+- name: maritime_x_base
+  kind: weights
+  url: gdrive:1Lo6YaM-K5RLUVvdXbpCKDVzZpHeF368E
+  sha256: 89a0007d8cc45f7ee6706f324acdd467f54c2d8cffd6ebb9a73887f03b9def61
+  size_bytes: 119564977
+  target: $EDGE_ASSETS/weights/maritime_x_base.pt
+  extract: false
+  note: the teacher of the pseudo-label recipe; clean checkpoint metadata
+- name: yolov12n
+  kind: weights
+  url: https://github.com/sunsmarterjie/yolov12/releases/download/turbo/yolov12n.pt
+  sha256: 37080c2891b94c62998f0bfb552dd70c32f9f2ee36618b9e7b3da49b49e150ac
+  size_bytes: 5515407
+  target: $EDGE_ASSETS/weights/yolov12n.pt
+  extract: false
+  note: official YOLOv12 release weights (turbo); the trainer's AMP self-check looks for this file
+- name: data_clear_train
+  kind: data
+  url: gdrive:1Lu3TamWxVdGlK49y28fNu6zycUobhvdW
+  sha256: 0489c2fb910c2659c957eb312f6d8207c4fc706607a8c5d0a07e892473e2191e
+  size_bytes: 355246080
+  n_files: 3919
+  target: $EDGE_DATA
+  extract: true
+  note: 1959 labelled frames of clear_train (frames/<video>-<idx>.jpg, JPEG 1920x1080), single-class labels (labels/<stem>.txt, class 0 = vessel) and lists/clear_train.txt
+- name: data_clear_val
+  kind: data
+  url: gdrive:1ohQLJuY8dJmOHn-46WUkeNYLGeNs7ntt
+  sha256: 55736a307273835da8560e6590fa2111100689ea92680a0785678fb43feb323a
+  size_bytes: 74803200
+  n_files: 823
+  target: $EDGE_DATA
+  extract: true
+  note: 411 labelled frames of clear_val (frames/<video>-<idx>.jpg, JPEG 1920x1080), single-class labels (labels/<stem>.txt, class 0 = vessel) and lists/clear_val.txt
+- name: data_clear_calib
+  kind: data
+  url: gdrive:1vYSU4_0QauFX1M2rRH9HfzXoiOKKIh_O
+  sha256: 1d9d6d52b66de107492925c487d977fec738193b554ee66c42157bb8031c6c91
+  size_bytes: 67276800
+  n_files: 743
+  target: $EDGE_DATA
+  extract: true
+  note: 371 labelled frames of clear_calib (frames/<video>-<idx>.jpg, JPEG 1920x1080), single-class labels (labels/<stem>.txt, class 0 = vessel) and lists/clear_calib.txt
+- name: data_clear_test
+  kind: data
+  url: gdrive:1ldungAzozJcQOkjY0S8WVNvFob74jZtQ
+  sha256: 6a1443feaef1c960f1bc6db26341684669a9db1de250cc933f3198c3aef48640
+  size_bytes: 104693760
+  n_files: 1175
+  target: $EDGE_DATA
+  extract: true
+  note: 587 labelled frames of clear_test (frames/<video>-<idx>.jpg, JPEG 1920x1080), single-class labels (labels/<stem>.txt, class 0 = vessel) and lists/clear_test.txt
+- name: data_nir_adapt
+  kind: data
+  url: gdrive:1LpqxWX_HXxVXVnStBt5DdYE2tBlZbpcg
+  sha256: 325e628e0ad65709a0a872618dddaf1fd3eeef7f280c4c796b1451f97e8b3c30
+  size_bytes: 125614080
+  n_files: 2167
+  target: $EDGE_DATA
+  extract: true
+  note: 1083 labelled frames of nir_adapt (frames/<video>-<idx>.jpg, JPEG 1920x1080), single-class labels (labels/<stem>.txt, class 0 = vessel) and lists/nir_adapt.txt
+- name: data_nir_eval
+  kind: data
+  url: gdrive:1gzpuypjzoMK957rI8oPcwcOcNcQWe3Ws
+  sha256: 1613cba5f4f13404c6a2afd9c8db6e2a6b5c9b66d5ca98e959c86b4064e4e929
+  size_bytes: 141045760
+  n_files: 2189
+  target: $EDGE_DATA
+  extract: true
+  note: 1094 labelled frames of nir_eval (frames/<video>-<idx>.jpg, JPEG 1920x1080), single-class labels (labels/<stem>.txt, class 0 = vessel) and lists/nir_eval.txt
+- name: data_haze_eval
+  kind: data
+  url: gdrive:19tliPRFsyA-XMWkIuriWcciZpgjzARHa
+  sha256: 9a5d984f0bd58203f5c4156d83a7425058e38d4818d58c51d829307ffb9f6e2c
+  size_bytes: 37672960
+  n_files: 555
+  target: $EDGE_DATA
+  extract: true
+  note: 277 labelled frames of haze_eval (frames/<video>-<idx>.jpg, JPEG 1920x1080), single-class labels (labels/<stem>.txt, class 0 = vessel) and lists/haze_eval.txt
+- name: data_onboard_eval
+  kind: data
+  url: gdrive:1XHgZBz2Uckm-6F-BAGe5IpmWMcgdg-Od
+  sha256: 7fb3510c5c92020bc27f6a3a4ca0dc62e500905aac7229b08f1356fba158a368
+  size_bytes: 85698560
+  n_files: 961
+  target: $EDGE_DATA
+  extract: true
+  note: 480 labelled frames of onboard_eval (frames/<video>-<idx>.jpg, JPEG 1920x1080), single-class labels (labels/<stem>.txt, class 0 = vessel) and lists/onboard_eval.txt
+- name: data_nir_haze_eval
+  kind: data
+  url: gdrive:1MbL3dX0AcsHqLlAvDgECC2xAVYoCBRY6
+  sha256: d56725fe25046e545594012f84eb6e0e254af423f41d22ea40a312b574359494
+  size_bytes: 11448320
+  n_files: 177
+  target: $EDGE_DATA
+  extract: true
+  note: 88 labelled frames of nir_haze_eval (frames/<video>-<idx>.jpg, JPEG 1920x1080), single-class labels (labels/<stem>.txt, class 0 = vessel) and lists/nir_haze_eval.txt

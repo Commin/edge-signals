@@ -1,0 +1,28 @@
+# Edge inference settings (fixed for every stage).
+env:
+  ultralytics_version: "8.3.63"
+  fork_commit: 2abab7153a065fb2925e8088e9ca2b19016ab7d6      # the pinned YOLOv12 fork commit (requirements.txt)
+  fork_dir_envvar: YOLOV12_DIR        # optional: a local checkout of the fork; if set, ultralytics must be imported from inside it.
+                                      # If unset, the pip-installed ultralytics must be the pinned commit (checked from its install record)
+
+model:
+  weights: $EDGE_ASSETS/weights/maritime_s_base.pt      # downloaded by fetch-assets (not in the repository or the image)
+  version: maritime_s_base.v0
+
+predict:                              # the operating point the consistency signal is defined on
+  imgsz: 640
+  conf: 0.25
+  iou: 0.7                            # detector NMS IoU (class-aware)
+  max_det: 300
+  agnostic_nms: false
+  half: false
+  device: auto                        # auto = GPU 0 if available, else CPU
+  batch: 16
+  chunk: 64                           # images per predict() call in replay
+
+stream:
+  fps: 6.0                            # effective frame rate of the processed stream (= source fps / frame_stride); the calibration is for 6 fps
+  video:
+    frame_stride: 5                   # keep every 5th frame of a 30 fps video (6 fps). Another stride is refused unless trigger.healthy_changes was calibrated at it
+    chunk: 16                         # frames per inference call when reading videos (memory)
+  device_id: ship-01

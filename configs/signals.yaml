@@ -1,0 +1,32 @@
+# Signals. Two independent switches per signal:
+#   measure: compute and log it            trigger: it takes part in the trigger decision (requires measure: true)
+# Window statistic per signal: window_transitions, aggregator (mean | median | worst10), comparator
+# (previous | anchor | rolling | reference), rolling_windows (only for rolling), change (difference | ratio).
+# A window is set by window_transitions OR window_seconds (converted with the stream frame rate); a trigger rule may use its own
+# comparator (configs/trigger.yaml) independent of the comparator logged here.
+# Windows never cross a clip change in replay; the comparison state (previous / anchor / rolling) does.
+defaults:
+  window_transitions: 30            # or, instead: window_seconds: 5 (x stream frame rate, configs/inference.yaml: stream.fps = 6 -> 30 transitions)
+  aggregator: median
+  comparator: previous
+  rolling_windows: 3
+  change: difference
+  min_valid_fraction: 0.5             # a window with fewer valid values than this share is itself invalid
+
+signals:
+  consistency:                        # quality: label-free motion-compensated consistency (released package)
+    measure: true
+    trigger: true
+  confidence:                         # quality: mean confidence of the kept boxes
+    measure: true
+    trigger: false
+  platform_motion:                    # context: global image shift from the consistency output
+    measure: true
+    trigger: false
+  feature_drift:                      # drift: Mahalanobis distance of the pooled backbone feature to the training reference
+    measure: true
+    trigger: false
+    comparator: reference             # absolute distance to the training reference (relative comparators also work)
+    params:
+      reference: references/feature_drift.343ece147e9b529d.npz
+      pca_dims: 32
