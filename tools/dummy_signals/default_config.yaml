@@ -1,0 +1,106 @@
+# Dummy signal generator: every parameter, with its default.
+# A structural parameter is either a fixed value or {range: [lo, hi]}, drawn once per seed (the draw is recorded in world.json).
+# Two ways to describe the edges: a random timeline (below: timeline, front_speed_kmh, edges with a position) or a scripted route per edge (edges[].route; see the README). They can be mixed.
+# Fixed constants (not parameters): 6 frames per second; a window = a Search clip = 30 frame pairs = 5 s. The trigger threshold delta is read from configs/trigger.yaml.
+
+# ------------------------------------------------------------------ the simple interface (set these first)
+simple:
+  duration: 24h            # simulated time per edge (seconds, or 90m / 24h / 1d); there is no other time horizon
+  perf_max: 0.90           # F1 of the best (model, area) cell: the quality range of the whole world is [perf_min, perf_max]
+  perf_min: 0.35           # F1 of the worst (model, area) cell
+  steepness: 0.6           # how abrupt the change between two areas is on an edge WITHOUT a route: 0 = a slow ramp (ramp_max_s), 1 = an abrupt step (one frame); a route sets its own moves
+  n_areas: 5               # number of abstract data areas (named A, B, C, ...); ignored when `areas` lists them
+  n_edges: null            # null = the edges listed below; a number truncates the list or adds edges at random positions
+
+# ------------------------------------------------------------------ areas (layer 1)
+areas: null                           # null = simple.n_areas areas named A, B, C, ...; or a list of names, or of {name: A, difficulty: 0.2} (a missing difficulty is drawn per seed, see area_params.difficulty)
+area_params:
+  difficulty: {range: [0.0, 1.0]}     # per area, drawn independently: 0 = easy, 1 = hard (scales the base precision / recall and, below, the object count)
+  lambda_obj: null                    # explicit mean objects per frame: a number, a list (one per area) or {range: [lo, hi]} per area; null = derived from the difficulty (next two lines)
+  lambda_easy: 9.0                    # mean objects per frame of an easy area (the real healthy footage has about 8-9 boxes per frame)
+  lambda_hard: 3.06                   # of the hardest area (difficulty 1): few objects -> empty frames -> ONE_SIDED zeros / EMPTY_PAIR (the collapse of consistency at low quality comes from here); target: about 30 % exact-zero consistency pairs in the F1 0.57 area
+  lambda_floor: 1.0                   # per-area lower bound of the mean objects per frame (a number or a list, one per area)
+  lambda_slow_sigma: 0.3              # log-scale amplitude of the slow modulation of the object count
+  lambda_slow_period_s: 20            # period of that modulation
+  dropout_share: 0.0                  # share of the time without any object in view (runs of empty frames); 0 = none: empty frames then come from the hard areas only (real clear footage has none)
+  dropout_period_s: 8                 # typical time scale of those stretches
+
+# ------------------------------------------------------------------ the global area timeline and the edges (layer 2)
+timeline:
+  duration_dist: lognormal            # semi-Markov: each segment lasts a random time, the next area is drawn uniformly among the others
+  median_s: 300                       # median segment duration (5 min)
+  sigma: 0.6                          # log-scale spread of the duration
+  min_s: 30
+  max_s: 3600
+  ramp_max_s: 120                     # longest ramp between two areas (steepness 0)
+  fixed_segments: null                # [[area, seconds], ...]: an explicit area sequence (cycled to cover the duration) instead of the random one; used by the calibration world
+front_speed_kmh: 30                   # the global timeline moves along the route at this speed; an edge sees it delayed by position / speed
+edges:                                # id, position along the route in km (omit position: drawn from position_range). Optional per edge:
+  - {id: e1, position: 0}             #   models: ids of the models stored on the edge (default: all);  initial_model: the model it runs at t = 0 (default: the first stored)
+  - {id: e2, position: 20}            #   route: [{stay: AREA, for: DURATION}, {move_to: AREA, over: DURATION}, ...]  (an edge with a route ignores the global timeline and its position; the steps must add up to simple.duration)
+  - {id: e3, position: 45}
+position_range: [0, 60]
+random_episodes: true                 # on | off (true | false): local episodes below; on a route they replace the area abruptly for their duration
+local_episodes:                       # a Poisson process per edge; each episode shows a random area to that edge only
+  rate_per_hour: 1.5
+  median_s: 150
+  sigma: 0.5
+
+# ------------------------------------------------------------------ models and the model x area matrices (layer 3)
+models:                               # size s | x; version; trained areas (names)
+  - {id: s_a, size: s, version: a, trained_areas: [A, B]}
+  - {id: x_a, size: x, version: a, trained_areas: [A, B]}
+  - {id: s_b, size: s, version: b, trained_areas: [C, D]}
+  - {id: x_b, size: x, version: b, trained_areas: [C, D]}
+  - {id: s_c, size: s, version: c, trained_areas: [E]}
+  - {id: x_c, size: x, version: c, trained_areas: [E]}
+matrix:                               # P, R = base_k + size_bonus + spec * [trained] - penalty * [not trained] + noise, clipped to [0, 1]; then rescaled to the F1 range perf_min..perf_max
+  precision: {base: 0.85, difficulty_scale: 0.30, size_bonus: {s: 0.0, x: 0.06}, spec: {range: [0.06, 0.10]}, penalty: {range: [0.10, 0.16]}, noise: 0.02}
+  recall:    {base: 0.85, difficulty_scale: 0.30, size_bonus: {s: 0.0, x: 0.06}, spec: {range: [0.06, 0.10]}, penalty: {range: [0.10, 0.16]}, noise: 0.02}
+  pr_cell_noise: 0.08                 # extra independent cell noise on P and on R, so that P and R are not collinear across cells (the slopes of C and Conf on P and R are then identifiable, as in the real per-video data)
+  fixed: null                         # {model_id: {P: [...], R: [...]}}: set the cells of a model directly (one value per area); used by the calibration world
+anchor:                               # the absolute levels combine the quality of the paper's model (F1 0.94) with the consistency / confidence levels of the edge model (real log A)
+  f1: 0.94                            # quality (P = R = F1) of a healthy cell
+  consistency: 0.788                  # median consistency of the real healthy footage (log A) at that quality
+  confidence: 0.6625                  # median confidence of the real healthy footage (log A) at that quality
+consistency:                          # centre C[m,k] = a + bp * P + br * R + N(0, cell_noise_sd); a is set from the anchor. Slopes and residual sd: real per-video regression
+  bp: 0.214                           # (63 videos without the on-board ones: consistency = 0.588 + 0.214 P + 0.125 R, residual sd 0.033)
+  br: 0.125
+  cell_noise_sd: 0.033
+confidence:                           # centre Conf[m,k] = a + bp * P + br * R + N(0, cell_noise_sd) (same regression: 0.433 + 0.240 P + 0.183 R, residual sd 0.040)
+  bp: 0.240
+  br: 0.183
+  cell_noise_sd: 0.040
+blind:
+  beta: 0.05                          # per untrained (m,k): the consistency centre is raised (consistency overestimates the quality of the cell); confidence is not affected
+  shift_sd: 2.0                       # the raise, in units of consistency.cell_noise_sd (2 x 0.033 = about 0.066)
+
+# ------------------------------------------------------------------ per-frame values
+frame:
+  n_obj_max: 40
+  z_iid_share: 0.5                    # frame difficulty z (shared by all models of an edge, not across edges): share of the variance that is per frame; the rest is slow
+  z_slow_period_s: 30
+  fp_floor: 0.05                      # mean false positives when there is no true positive
+  # The weights below were chosen by calibrate.py (differential evolution + Nelder-Mead on seeds 0-19; the targets are scale-free statistics of real per-frame detections, see calibrate.py)
+  recall_noise: {gamma_z: 0.0347, model_noise: 0.0090}           # r = R + gamma_z * z + model_noise * N: recall event rate (9.1 %), AUROC and Spearman of consistency / confidence against recall
+  precision_noise: {gamma_z: 0.0802, model_noise: 0.0007}        # the same for precision (event rate 12.6 %)
+consistency_frame:
+  gamma_p_hat: 0.0                    # weight of the pair's realised precision (mean of the two frames) minus the cell's P; the search found no gain from it (off)
+  gamma_r_hat: 0.0                    # the same for the realised recall (off)
+  gamma_z: 0.1030                     # C + gamma_z * z (z averaged over the two frames of the pair) + model_noise * N + slow wander: AUROC / Spearman of consistency
+  model_noise: 0.0176                 # per-pair noise: kept as small as the AUROC targets need; the within-window std of the healthy area is then 0.054 (real 0.066)
+  wander: calibrated                  # calibrated | 0 | a number (std of the slow wander)
+  wander_calibrated_std: 0.040        # slow wander: tuned so that on healthy data the window median drops by more than delta (0.080) in about 5 % of the windows (real: std of the change 0.050)
+  wander_period_s: 6
+  wander_df: 3                        # null = Gaussian knots; a number = Student-t knots (heavier tails)
+  wander_shared_share: 0.5            # share of the wander variance common to all models of an edge
+confidence_frame:                     # the mean confidence of the kept boxes: its noise shrinks as 1 / sqrt(n_box) (reference 8 boxes, the real mean is 7.7)
+  gamma_p_hat: 0.0                    # weight of the frame's realised precision minus the cell's P (off)
+  gamma_r_hat: 0.0                    # the same for the realised recall (off)
+  gamma_z: 0.0511                     # AUROC / Spearman of the confidence score against recall and precision events
+  model_noise: 0.00566
+
+# ------------------------------------------------------------------ calibration world (tools/dummy_signals/calibrate.py)
+calibration:
+  pr_ratio: [0.9930, 0.9410, 0.8044, 0.9049]   # P / R of the calibration world's four cells (targets: event rates of recall 9.1 % and precision 12.6 %)
+  lambda_hard_area: 3.0605            # mean objects per frame in its hard (F1 0.57) area (target: about 30 % exact-zero consistency pairs there); the other three areas have 9

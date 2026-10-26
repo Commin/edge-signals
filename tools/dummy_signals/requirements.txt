@@ -1,0 +1,4 @@
+numpy
+scipy
+pyyaml
+matplotlib   # optional (only for your own plots)

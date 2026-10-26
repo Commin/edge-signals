@@ -18,6 +18,7 @@ D. K. Prasad, D. Rajan, L. Rachmawati, E. Rajabally, and C. Quek, "Video Process
 * `third_party/consistency/` - the released consistency package, vendored unchanged (see `VENDORED.txt` for the commit; `FILES.sha256`).
 * `configs/` - all parameters (YAML), including `assets.yaml`. `schemas/local_signal_event.json` - the log format. `references/` - the small derived reference bundles (`.npz`).
 * `data/mapping/frame_map.csv` - metadata only: (video, original frame index) <-> labelled image name.
+* `tools/dummy_signals/` - synthetic multi-edge streams in the real log format, for testing model Search / Switch (no GPU, model or video; synthetic data, see its README).
 * `docs/HANDOFF.md` - step-by-step handoff for the integration (commands verified in fresh containers).
 * `docker/`, `Dockerfile` - the environment of the YOLOv12 fork, exactly as the fork specifies. `tests/` - unit tests on tiny synthetic fixtures.
 
