@@ -8,7 +8,7 @@ import numpy as np
 from scipy.special import ndtri
 
 # layers (what a draw is for)
-L_CONFIG, L_TIMELINE, L_EPISODE, L_MATRIX, L_NOBJ, L_LAMBDA, L_Z, L_RECALL, L_PRECISION, L_TP, L_FP, L_CONF, L_CONS, L_WANDER = range(1, 15)
+L_CONFIG, L_TIMELINE, L_EPISODE, L_MATRIX, L_NOBJ, L_LAMBDA, L_Z, L_RECALL, L_PRECISION, L_TP, L_FP, L_CONF, L_CONS, L_WANDER, L_TRANSITION = range(1, 16)
 
 _G = np.uint64(0x9E3779B97F4A7C15)
 _M1 = np.uint64(0xBF58476D1CE4E5B9)

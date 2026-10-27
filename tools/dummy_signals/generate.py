@@ -3,9 +3,11 @@
 
   generate.py        --config C [--seed N] --out DIR [--logs minimal]    (no subcommand) world.json plus, for every edge, the stream of its initial model in DIR/<edge>/
   generate.py world  [--config C] [--seed N] --out DIR                    write world.json (all parameters and draws = ground truth)
-  generate.py stream [--config C] [--seed N] --edge E --schedule 0:s_a,3600:x_b@edge2 --out DIR [--delta D] [--no-signals-log]
+  generate.py stream [--config C] [--seed N] --edge E --schedule 0:s_a,3600:x_b@cloud --out DIR [--delta D] [--no-signals-log]
                                                                           signals / windows / requests / context / frames.jsonl, truth.jsonl, summary.json (+ world.json);
                                                                           --logs minimal: windows, requests, context and truth only
+  generate.py oracle [--config C] [--seed N] --out DIR [--window 5s]      oracle.csv, oracle_summary.csv and world.json: the true F1, the clip consistency and confidence of EVERY
+                                                                          model on each edge's data per window, where each model is stored, and the best model per window (ground truth, not a decision)
   generate.py clip   [--config C] [--seed N] --edge E --model M --t-end T [--n-pairs 30]
                                                                           clip score of model M on the data of edge E (the requester) for the 30 pairs ending at T
 
@@ -24,11 +26,11 @@ from tools.dummy_signals.world import World  # noqa: E402
 
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    if not argv or argv[0] not in ("world", "stream", "clip", "run", "-h", "--help"):
+    if not argv or argv[0] not in ("world", "stream", "clip", "oracle", "run", "-h", "--help"):
         argv = ["run"] + argv                                                    # the default command
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("run", "world", "stream", "clip"):
+    for name in ("run", "world", "stream", "clip", "oracle"):
         p = sub.add_parser(name)
         p.add_argument("--config", help="YAML overrides of tools/dummy_signals/default_config.yaml")
         p.add_argument("--seed", type=int, default=0)
@@ -37,7 +39,9 @@ def main(argv=None):
         if name in ("stream", "clip"):
             p.add_argument("--edge", required=True)
         if name == "stream":
-            p.add_argument("--schedule", required=True, help="'0:s_a,3600:x_b@edge2': model id from time t (seconds); @edge = the edge it is fetched from (default: the first edge that stores it)")
+            p.add_argument("--schedule", required=True, help="'0:s_a,3600:x_b@cloud': model id from time t (seconds); @edge = the edge it is fetched from (default: the first edge that stores it)")
+        if name == "oracle":
+            p.add_argument("--window", default="5s", help="window length: 5s (30 frame pairs, the default), 10s, 1m, ... (a multiple of 1/6 s)")
         if name in ("run", "stream"):
             p.add_argument("--delta", type=float, help="trigger threshold (default: configs/trigger.yaml)")
             p.add_argument("--no-signals-log", action="store_true", help="leave signals.jsonl empty")
@@ -51,6 +55,11 @@ def main(argv=None):
         w = World(a.config, a.seed)
         if a.cmd == "world":
             print(w.save(Path(a.out) / "world.json"))
+        elif a.cmd == "oracle":
+            from tools.dummy_signals import oracle
+            o = oracle.write(w, a.out, a.window)
+            print(f"oracle.csv: {len(w.edges)} edges x {o['n_windows']} windows x {len(o['models'])} models -> {Path(a.out) / 'oracle.csv'}")
+            print(f"oracle_summary.csv -> {Path(a.out) / 'oracle_summary.csv'}")
         elif a.cmd == "run":
             out = Path(a.out)
             out.mkdir(parents=True, exist_ok=True)

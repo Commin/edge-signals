@@ -44,6 +44,8 @@ class World:
                 off = pos / c["front_speed_kmh"] * 3600.0
             self.edges.append({"id": sp_["id"], "mode": sp_["mode"], "models": sp_["models"], "initial_model": sp_["initial_model"], "route": sp_["route"], "position_km": pos, "offset_s": off})
         self.edge_index = {e["id"]: i for i, e in enumerate(self.edges)}
+        self.nodes = [{"id": e["id"], "kind": "edge", "models": list(e["models"])} for e in self.edges] + cfgmod.resolve_nodes(c, list(self.edge_index))
+        self.node_index = {n["id"]: n for n in self.nodes}
         self.model_index = {m["id"]: i for i, m in enumerate(c["models"])}
         # timelines
         offs = [e["offset_s"] for e in self.edges if e["mode"] == "random"]
@@ -53,13 +55,14 @@ class World:
         self.global_segments = areas.global_timeline(self.seed, self.K, tl, -max(offs) - 1.0, self.duration_s + 1.0) if offs else []
         self.ramp_s = max(1.0 / FPS, c["timeline"]["ramp_max_s"] * (1.0 - sp["steepness"]))
         ep_cfg = c["local_episodes"] if c["random_episodes"] else dict(c["local_episodes"], rate_per_hour=0)
-        self.episodes, self.edge_segments, self.edge_tl = [], [], []
+        self.episodes, self.edge_segments, self.edge_tl, self.transitions = [], [], [], {}
         for i, (e, sp_) in enumerate(zip(self.edges, specs)):
             ep = areas.local_episodes(self.seed, i, self.K, ep_cfg, self.duration_s)
             self.episodes.append(ep)
             if e["mode"] == "route":
                 self.edge_segments.append(sp_["steps"])
-                self.edge_tl.append(areas.RouteTimeline(sp_["steps"], ep))
+                common, dev = self._transitions(i, e["id"], sp_["steps"])
+                self.edge_tl.append(areas.RouteTimeline(sp_["steps"], ep, common, dev))
             else:
                 base = [(t0 + e["offset_s"], t1 + e["offset_s"], r, "global") for (t0, t1, r) in self.global_segments]
                 segs = areas.overlay(base, ep)
@@ -69,6 +72,23 @@ class World:
         mt = models.build(c, self.seed, self.difficulty)
         self.P, self.R, self.F1, self.C, self.Conf = mt["P"], mt["R"], mt["F1"], mt["C"], mt["Conf"]
         self.blind, self.trained, self.warnings, self.matrix_info = mt["blind"], mt["trained"], mt["warnings"], mt
+
+    def _transitions(self, ei, eid, steps):
+        """Per step: the common part and the deviation of every model of the transition effect (a deviation is drawn N(0, spread) per seed, edge, move and model unless it is given)."""
+        ids = [m["id"] for m in self.cfg["models"]]
+        common, dev, rec = np.zeros(len(steps)), np.zeros((len(steps), len(ids))), []
+        for si, st in enumerate(steps):
+            tr = st.get("transition")
+            if not tr:
+                continue
+            common[si] = tr["common"]
+            for mi, m in enumerate(ids):
+                dev[si, mi] = tr["models"][m] if m in tr["models"] else tr["spread"] * float(rng.normal(self.seed, rng.L_TRANSITION, ei, si, mi))
+            rec.append({"step": si, "from_area": self.names[st["from_area"]], "to_area": self.names[st["area"]], "t0": st["t0"], "t1": st["t1"], "common": tr["common"], "spread": tr["spread"],
+                        "given": dict(tr["models"]), "deviation": {m: round(float(dev[si, mi]), 6) for mi, m in enumerate(ids)}})
+        if rec:
+            self.transitions[eid] = rec
+        return common, dev
 
     def _per_area(self, spec, layer):
         if isinstance(spec, list):
@@ -98,17 +118,29 @@ class World:
         """Ids of the models stored on edge e (any model of the world can still be run on it: it is fetched from the edge that stores it)."""
         return list(self.edges[self._e(e)]["models"])
 
-    def model_source(self, e, m, from_edge=None):
-        """-> ("local" | "fetched", id of the edge the model comes from). A model that no edge stores is "fetched" from None."""
+    def node_models(self, node):
+        """Ids of the models stored on a node (an edge or a cloud node)."""
+        if node not in self.node_index:
+            raise KeyError(f"unknown node '{node}' (nodes: {', '.join(self.node_index)})")
+        return list(self.node_index[node]["models"])
+
+    def model_locations(self, m):
+        """Every node that stores model m: the edges first, then the cloud nodes, each in the order of the configuration."""
+        return [n["id"] for n in sorted(self.nodes, key=lambda n: n["kind"] != "edge") if m in n["models"]]
+
+    def model_source(self, e, m, from_node=None):
+        """-> ("local" | "fetched", id of the node the model comes from) for edge e running model m.
+        A model stored on e itself is local; otherwise it is fetched from `from_node`, or from the first other edge that stores it, or else from a cloud node (None if no node stores it)."""
         eid = self.edges[self._e(e)]["id"]
-        if from_edge is not None:
-            fe = self.edges[self._e(from_edge)]
-            if m not in fe["models"]:
-                raise ValueError(f"model '{m}' is not stored on edge '{fe['id']}'")
-            return ("local", eid) if fe["id"] == eid else ("fetched", fe["id"])
-        if m in self.edges[self._e(e)]["models"]:
+        if from_node is not None:
+            if from_node not in self.node_index:
+                raise KeyError(f"unknown node '{from_node}' (nodes: {', '.join(self.node_index)})")
+            if m not in self.node_index[from_node]["models"]:
+                raise ValueError(f"model '{m}' is not stored on node '{from_node}'")
+            return ("local", eid) if from_node == eid else ("fetched", from_node)
+        if m in self.node_index[eid]["models"]:
             return "local", eid
-        owners = [x["id"] for x in self.edges if m in x["models"]]
+        owners = self.model_locations(m)
         return "fetched", (owners[0] if owners else None)
 
     def area(self, e, t):
@@ -117,10 +149,14 @@ class World:
         return self.names[int(idx)] if np.ndim(idx) == 0 else np.array(self.names)[idx]
 
     def quality(self, e, m, t):
-        """P, R and F1 of model m on the data of edge e at time t (arrays): P and R are interpolated linearly during a move and F1 is recomputed from them."""
-        a, b, s, _ = self.edge_tl[self._e(e)].mix(t)
+        """P, R and F1 of model m on the data of edge e at time t (arrays): P and R are interpolated linearly during a move (plus the transition effect, if the move has one) and F1 is recomputed from them."""
+        tl = self.edge_tl[self._e(e)]
+        a, b, s, _ = tl.mix(t)
         mi = self._m(m)
         P, R = (1 - s) * self.P[mi, a] + s * self.P[mi, b], (1 - s) * self.R[mi, a] + s * self.R[mi, b]
+        sh = tl.shift(t, mi)
+        if np.any(sh):                                                           # the transition effect of a move (clipped like the cells)
+            P, R = np.clip(P + sh, 0.01, 0.995), np.clip(R + sh, 0.01, 0.995)
         return {"P": P, "R": R, "F1": models.f1_of(P, R)}
 
     def segments(self, e):
@@ -160,9 +196,9 @@ class World:
         r5 = lambda x: round(float(x), 5)
         return {"synthetic": True, "seed": self.seed, "fps": FPS, "window_pairs": 30, "duration_s": self.duration_s, "n_areas": self.K, "config": self.cfg, "range_draws": self.draws,
                 "areas": [{"name": n, "difficulty": r5(self.difficulty[k]), "lambda_obj": r5(self.lam[k])} for k, n in enumerate(self.names)],
-                "edges": self.edges, "ramp_s": self.ramp_s,
+                "edges": self.edges, "nodes": self.nodes, "ramp_s": self.ramp_s,
                 "global_timeline": [{"t0": a, "t1": b, "area": self.names[int(r)]} for (a, b, r) in self.global_segments],
-                "edge_segments": {e["id"]: self.segments(e["id"]) for e in self.edges},
+                "edge_segments": {e["id"]: self.segments(e["id"]) for e in self.edges}, "transitions": self.transitions,
                 "local_episodes": {e["id"]: [{"t0": a, "t1": b, "area": self.names[int(r)]} for (a, b, r) in self.episodes[i]] for i, e in enumerate(self.edges)},
                 "models": self.cfg["models"], "precision": mat(self.P), "recall": mat(self.R), "f1": mat(self.F1), "consistency_centre": mat(self.C), "confidence_centre": mat(self.Conf),
                 "blind_cells": [{"model": mid[i], "area": self.names[int(k)]} for i, k in zip(*np.nonzero(self.blind))], "trained": mat(self.trained.astype(float)),

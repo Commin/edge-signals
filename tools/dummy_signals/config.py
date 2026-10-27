@@ -111,8 +111,34 @@ def area_index(names, x, where="area"):
     raise ConfigError(f"{where}: unknown area {x!r} (areas: {', '.join(names)})")
 
 
-def resolve_route(route, names, duration_s, edge_id):
-    """[{stay: A, for: 40m}, {move_to: B, over: 20m}, ...] -> contiguous steps with t0, t1 in seconds and area indices; the lengths must add up to the duration."""
+def resolve_transition(tr, model_ids, where):
+    """transition: {common: -0.15, spread: 0.05, models: {s_a: -0.05}} -> {common, spread, models} (numbers; defaults 0, 0, {})."""
+    if not isinstance(tr, dict):
+        raise ConfigError(f"{where}: transition must be a mapping {{common, spread, models}}")
+    if set(tr) - {"common", "spread", "models"}:
+        raise ConfigError(f"{where}: unknown transition key(s) {sorted(set(tr) - {'common', 'spread', 'models'})} (use common, spread, models)")
+    out = {}
+    for k in ("common", "spread"):
+        v = tr.get(k, 0.0)
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            raise ConfigError(f"{where}: transition.{k} must be a number, got {v!r}")
+        out[k] = float(v)
+    if out["spread"] < 0:
+        raise ConfigError(f"{where}: transition.spread must be >= 0")
+    models = tr.get("models") or {}
+    if not isinstance(models, dict):
+        raise ConfigError(f"{where}: transition.models must map model ids to deviations")
+    for m, v in models.items():
+        if m not in model_ids:
+            raise ConfigError(f"{where}: transition.models: unknown model '{m}'")
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            raise ConfigError(f"{where}: transition.models.{m} must be a number, got {v!r}")
+    out["models"] = {str(m): float(v) for m, v in models.items()}
+    return out
+
+
+def resolve_route(route, names, duration_s, edge_id, model_ids=()):
+    """[{stay: A, for: 40m}, {move_to: B, over: 20m, transition: {...}}, ...] -> contiguous steps with t0, t1 in seconds and area indices; the lengths must add up to the duration."""
     if not isinstance(route, list) or not route:
         raise ConfigError(f"edge {edge_id}: route must be a non-empty list")
     steps, t, cur = [], 0.0, None
@@ -122,10 +148,10 @@ def resolve_route(route, names, duration_s, edge_id):
         keys = set(st)
         if keys == {"stay", "for"}:
             kind, area, d = "stay", area_index(names, st["stay"], f"edge {edge_id}, route step {i + 1}"), parse_duration(st["for"])
-        elif keys == {"move_to", "over"}:
+        elif keys in ({"move_to", "over"}, {"move_to", "over", "transition"}):
             kind, area, d = "move", area_index(names, st["move_to"], f"edge {edge_id}, route step {i + 1}"), parse_duration(st["over"])
         else:
-            raise ConfigError(f"edge {edge_id}, route step {i + 1}: expected {{stay: AREA, for: DURATION}} or {{move_to: AREA, over: DURATION}}, got keys {sorted(keys)}")
+            raise ConfigError(f"edge {edge_id}, route step {i + 1}: expected {{stay: AREA, for: DURATION}} or {{move_to: AREA, over: DURATION}}, got keys {sorted(keys)} (transition is only allowed on a move_to step)")
         if d <= 0:
             raise ConfigError(f"edge {edge_id}, route step {i + 1}: the duration must be positive")
         if kind == "move":
@@ -136,11 +162,35 @@ def resolve_route(route, names, duration_s, edge_id):
         step = {"kind": kind, "t0": t, "t1": t + d, "area": area}
         if kind == "move":
             step["from_area"] = cur
+            step["transition"] = resolve_transition(st["transition"], model_ids, f"edge {edge_id}, route step {i + 1}") if "transition" in st else None
         steps.append(step)
         t, cur = t + d, area
     if abs(t - duration_s) > 1e-6:
         raise ConfigError(f"edge {edge_id}: the route lasts {t:g} s but simple.duration is {duration_s:g} s (the steps must add up to the duration)")
     return steps
+
+
+def resolve_nodes(cfg, edge_ids):
+    """Nodes that are not edges: [{id, kind: cloud, models}]. A cloud node only stores models (no route, no data, no stream)."""
+    model_ids = [m["id"] for m in cfg["models"]]
+    out, seen = [], set(edge_ids)
+    for n in cfg.get("nodes") or []:
+        if not isinstance(n, dict) or "id" not in n:
+            raise ConfigError(f"nodes: every node needs an id, got {n!r}")
+        if set(n) - {"id", "kind", "models"}:
+            raise ConfigError(f"node {n['id']}: unknown key(s) {sorted(set(n) - {'id', 'kind', 'models'})} (a cloud node has id, kind, models)")
+        if n.get("kind") != "cloud":
+            raise ConfigError(f"node {n['id']}: kind must be 'cloud' (edges are listed under edges:)")
+        nid = str(n["id"])
+        if nid in seen:
+            raise ConfigError(f"duplicate node id '{nid}' (ids are unique across edges and nodes)")
+        seen.add(nid)
+        mods = list(n.get("models") or [])
+        for m in mods:
+            if m not in model_ids:
+                raise ConfigError(f"node {nid}: unknown model '{m}' in models")
+        out.append({"id": nid, "kind": "cloud", "models": mods})
+    return out
 
 
 def resolve_edges(cfg, names, duration_s):
@@ -173,7 +223,7 @@ def resolve_edges(cfg, names, duration_s):
         if init not in mods:
             raise ConfigError(f"edge {eid}: initial_model '{init}' is not among the models stored on the edge ({', '.join(mods)})")
         route = e.get("route")
-        steps = resolve_route(route, names, duration_s, eid) if route is not None else None
+        steps = resolve_route(route, names, duration_s, eid, model_ids) if route is not None else None
         out.append({"id": eid, "mode": "route" if route is not None else "random", "position": e.get("position"), "models": mods, "initial_model": init, "route": route, "steps": steps})
     return out
 
@@ -210,6 +260,8 @@ def load(config=None, seed=0):
     cfg = resolve(cfg, seed, "", draws)
     cfg["simple"]["duration_s"] = parse_duration(cfg["simple"]["duration"])
     cfg["random_episodes"] = parse_switch(cfg["random_episodes"], "random_episodes")
+    for k in ("cell_noise", "blind_cells"):
+        cfg["signals"][k] = parse_switch(cfg["signals"][k], f"signals.{k}")
     names = area_names(cfg)
     K = len(names)
     cfg["simple"]["n_areas"] = K
@@ -229,5 +281,6 @@ def load(config=None, seed=0):
             area_index(names, a, f"model {m['id']}, trained_areas")
     if len({m["id"] for m in cfg["models"]}) != len(cfg["models"]):
         raise ConfigError("duplicate model id")
-    resolve_edges(cfg, names, cfg["simple"]["duration_s"])
+    edges = resolve_edges(cfg, names, cfg["simple"]["duration_s"])
+    resolve_nodes(cfg, [e["id"] for e in edges])
     return cfg, draws

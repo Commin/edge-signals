@@ -113,6 +113,10 @@ class EdgeTimeline:
     def label_at(self, t):
         return self.mix(t)[3]
 
+    def shift(self, t, mi):
+        """No transition effect on a random timeline."""
+        return np.zeros_like(np.asarray(t, dtype=float))
+
 
 class RouteTimeline:
     """A scripted route: stay steps (one area) and move steps (a linear blend from the previous area to the next one). Same interface as EdgeTimeline.
@@ -121,8 +125,11 @@ class RouteTimeline:
     episodes: [(t0, t1, area)] of random local episodes; on a route they are abrupt (the area is replaced for that time).
     """
 
-    def __init__(self, steps, episodes=()):
+    def __init__(self, steps, episodes=(), common=None, dev=None):
         self.steps = steps
+        n = len(steps)
+        self.t_common = np.zeros(n) if common is None else np.asarray(common, float)                 # transition effect: per step, the common part ...
+        self.t_dev = np.zeros((n, 1)) if dev is None else np.asarray(dev, float)                     # ... and the deviation of each model (steps x models); zero = no effect
         self.starts = np.array([s["t0"] for s in steps])
         self.ends = np.array([s["t1"] for s in steps])
         self.to = np.array([s["area"] for s in steps], dtype=int)
@@ -145,3 +152,13 @@ class RouteTimeline:
 
     def label_at(self, t):
         return self.mix(t)[3]
+
+    def shift(self, t, mi):
+        """Transition effect on P and R of model mi at time t: w(t) * (common + deviation of the model), w = Hann weight of the move (0 at both ends, 1 at its midpoint); 0 outside a move."""
+        t = np.asarray(t, dtype=float)
+        j = np.clip(np.searchsorted(self.starts, t, side="right") - 1, 0, len(self.steps) - 1)
+        s = np.clip((t - self.starts[j]) / np.maximum(self.ends[j] - self.starts[j], 1e-9), 0.0, 1.0)
+        val = np.where(self.move[j], 0.5 * (1.0 - np.cos(2.0 * np.pi * s)) * (self.t_common[j] + self.t_dev[j, mi]), 0.0)
+        for (e0, e1, r) in self.episodes:                                                           # an episode replaces the area abruptly: no mixed zone
+            val = np.where((t >= e0) & (t < e1), 0.0, val)
+        return val

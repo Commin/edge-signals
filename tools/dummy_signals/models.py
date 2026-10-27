@@ -57,14 +57,15 @@ def build(cfg, seed, difficulty):
         warnings.append(f"F1 range [{F1[free].min():.2f}, {F1[free].max():.2f}] differs from [perf_min, perf_max] by more than 0.04 (clipping of P / R)")
     a_c, a_f = anchors(cfg)
     c, f = cfg["consistency"], cfg["confidence"]
-    nC = np.array([[float(rng.normal(seed, rng.L_MATRIX, 3, i, k)) for k in range(K)] for i in range(M)]) * c["cell_noise_sd"]
-    nF = np.array([[float(rng.normal(seed, rng.L_MATRIX, 4, i, k)) for k in range(K)] for i in range(M)]) * f["cell_noise_sd"]
+    sg = cfg["signals"]
+    nC = np.array([[float(rng.normal(seed, rng.L_MATRIX, 3, i, k)) for k in range(K)] for i in range(M)]) * (c["cell_noise_sd"] if sg["cell_noise"] else 0.0)      # signals.cell_noise off: the centres follow P and R exactly
+    nF = np.array([[float(rng.normal(seed, rng.L_MATRIX, 4, i, k)) for k in range(K)] for i in range(M)]) * (f["cell_noise_sd"] if sg["cell_noise"] else 0.0)
     C = a_c + c["bp"] * P + c["br"] * R + nC
     Conf = a_f + f["bp"] * P + f["br"] * R + nF
     blind = np.zeros((M, K), dtype=bool)
     for i in range(M):
         for k in range(K):
-            if not trained[i, k] and float(rng.uniform(seed, rng.L_MATRIX, 5, i, k)) < cfg["blind"]["beta"]:
+            if sg["blind_cells"] and not trained[i, k] and float(rng.uniform(seed, rng.L_MATRIX, 5, i, k)) < cfg["blind"]["beta"]:
                 blind[i, k] = True
     C = C + blind * cfg["blind"]["shift_sd"] * c["cell_noise_sd"]                  # a blind cell: consistency overestimates its quality; Conf is unaffected
     C, Conf = np.clip(C, 0.02, 0.98), np.clip(Conf, 0.02, 0.98)

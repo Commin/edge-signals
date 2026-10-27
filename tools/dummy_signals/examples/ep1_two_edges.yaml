@@ -1,0 +1,101 @@
+# ep1_two_edges.yaml - two edges, no cloud, a bad mixed zone
+#
+# Two ships swap areas. Each ship stores only the model trained on the area it starts in: edge1 starts in A with s_a and sails to B, edge2 starts in B with s_b and sails to A.
+# After its move a ship runs a model that is NOT trained on its area, while the model it needs (the one of the other ship) is stored on the other edge.
+# Transition effect: common -0.15 on both moves, so BOTH models are worse in the mixed zone in the middle of the move (P and R 0.15 below the linear interpolation at the midpoint):
+# the ships pass a zone where neither the old nor the new model is good.
+#
+# How to use this file
+#   python tools/dummy_signals/generate.py --config tools/dummy_signals/examples/ep1_two_edges.yaml --seed 0 --out run_ep1 --logs minimal    # one stream per edge (its initial model) + world.json
+#   python tools/dummy_signals/generate.py oracle --config tools/dummy_signals/examples/ep1_two_edges.yaml --seed 0 --out oracle_ep1          # how EVERY model performs on each edge's data, per 5-s window
+# To adapt it: copy the file, then change the names, the durations, the model lists, the quality table or the routes below. Every parameter that is not written here keeps its value
+# from default_config.yaml (noise, calibration, signal mappings, ...). The generator contains no model selection: the file only describes the world.
+
+# ---------------------------------------------------------------------------------------
+# Simple parameters
+# ---------------------------------------------------------------------------------------
+simple:
+  duration: 2h         # simulated time of every edge; the route of every edge below must add up to exactly this (30m + 60m + 30m = 2h)
+                       # (perf_max / perf_min are not set: every (model, area) cell is pinned in matrix.fixed below)
+
+# ---------------------------------------------------------------------------------------
+# Areas: kinds of data a ship can be in (no weather meaning: just "different data").
+# The difficulty is EQUAL for all areas on purpose (0.3 each): it sets the number of objects per frame, so no area is harder than another.
+# To use random difficulties instead, write the names only (areas: [A, B]); to make one area harder, give it a larger number (0 = easy ... 1 = hard).
+# ---------------------------------------------------------------------------------------
+areas:
+  - {name: A, difficulty: 0.3}
+  - {name: B, difficulty: 0.3}
+
+# ---------------------------------------------------------------------------------------
+# Models: size (s or x) and version (a, b, c: the area it was trained on).
+#   trained_areas: the areas the model was trained on
+# ---------------------------------------------------------------------------------------
+models:
+  - {id: s_a, size: s, version: a, trained_areas: [A]}
+  - {id: s_b, size: s, version: b, trained_areas: [B]}
+
+# ---------------------------------------------------------------------------------------
+# Quality of every model on every area, pinned (matrix.fixed): precision P and recall R, one value per area in the order of `areas` above.
+# With P = R the F1 of the cell is the same number. The table (F1 = P = R):
+#
+#                        on its trained area     on any other area
+#     size s model             0.86                   0.58
+#     size x model             0.90                   0.63
+#
+# So the story is deterministic: a model is good on the area it was trained on, worse elsewhere, and x is a little better than s; only the per-frame noise remains.
+# To edit: change a number in the table below (for example give one model a lower value on one area), keep one value per area for P and for R.
+# ---------------------------------------------------------------------------------------
+matrix:
+  fixed:
+    s_a: {P: [0.86, 0.58], R: [0.86, 0.58]}
+    s_b: {P: [0.58, 0.86], R: [0.58, 0.86]}
+
+# ---------------------------------------------------------------------------------------
+# Signals: two switches for the random parts of the consistency / confidence centres of the (model, area) cells (the quality above is pinned either way).
+#   cell_noise:  off   random cell offsets of the consistency / confidence centres. off = the centres follow P and R exactly; on = realistic (a model's signal level on an
+#                      area is then a little different from what its quality predicts), for experiments on how well the signals can tell models apart
+#   blind_cells: off   cells where consistency overstates the quality of a model that was not trained on the area. on = realistic, for experiments
+# The examples ship with both off, so the story is deterministic; in default_config.yaml both are on. (on | off, or true | false)
+# ---------------------------------------------------------------------------------------
+signals:
+  cell_noise: off
+  blind_cells: off
+
+# ---------------------------------------------------------------------------------------
+# Nodes
+#   edges (ships) have a route and produce data:
+#     models:        the models stored on this edge
+#     initial_model: the model it runs at t = 0 (it must be stored on the edge)
+#     route:         where the ship is, step by step
+#       - {stay: AREA, for: DURATION}        stays in one area
+#       - {move_to: AREA, over: DURATION, transition: {...}}
+#                                              moves gradually to another area: P, R and the signals change linearly over that time.
+#                                              The optional `transition` adds a hump to every model's P and R during the move (0 at both ends, largest at the midpoint):
+#                                                common: added to every model (< 0: every model is worse in the mixed zone, > 0: better)
+#                                                spread: each model also gets its own deviation, drawn N(0, spread) per seed
+#                                                models: {s_a: -0.05} fixes the deviation of a model instead of drawing it
+#                                              Without `transition` the move is the plain linear one.
+#     A route starts with "stay". Durations: 30s, 40m, 40min, 2h (mixed freely).
+#   cloud nodes ({id, kind: cloud, models}) only store models: no route, no data, no stream.
+# Any node can serve a model to an edge; the clip that scores a model is always the data of the edge that asks.
+# ---------------------------------------------------------------------------------------
+edges:
+  - id: edge1
+    models: [s_a]
+    initial_model: s_a
+    route:
+      - {stay: A, for: 30m}
+      - {move_to: B, over: 60m, transition: {common: -0.15}}   # both sides are bad in the mixed zone
+      - {stay: B, for: 30m}
+
+  - id: edge2
+    models: [s_b]
+    initial_model: s_b
+    route:
+      - {stay: B, for: 30m}
+      - {move_to: A, over: 60m, transition: {common: -0.15}}
+      - {stay: A, for: 30m}
+
+# No random local events: the ships follow their routes exactly. (on | off, or true | false)
+random_episodes: off

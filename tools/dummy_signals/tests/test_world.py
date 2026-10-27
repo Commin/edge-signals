@@ -311,8 +311,8 @@ def test_signals_see_the_realised_precision_of_the_frame_when_asked_to():
 
 
 # ---------------------------------------------------------------------------------------- scripted scenario
-SCENARIO_FILE = HERE / "scenario_abc.yaml"
-SCENARIO = {                                   # the three-ship scenario (sizes s and x; versions a, b, c trained on areas A, B, C); the same content as scenario_abc.yaml when that file exists
+EXAMPLES = HERE / "examples"
+SCENARIO = {                                   # a three-ship scenario (sizes s and x; versions a, b, c trained on areas A, B, C); the route lengths differ from the examples on purpose
     "simple": {"perf_max": 0.90, "perf_min": 0.50, "duration": "2h", "steepness": 0.5},
     "areas": ["A", "B", "C"],
     "models": [{"id": f"{size}_{ver}", "size": size, "version": ver, "trained_areas": [area]} for ver, area in (("a", "A"), ("b", "B"), ("c", "C")) for size in "sx"],
@@ -339,11 +339,9 @@ def scen(over=None, seed=0):
     return World(cfg, seed)
 
 
-@pytest.mark.parametrize("source", ["inline", pytest.param("file", marks=pytest.mark.skipif(not SCENARIO_FILE.exists(), reason="scenario_abc.yaml is not in this tree"))])
-def test_the_example_scenario_loads_as_given_and_every_route_adds_up_to_the_duration(source):
-    import yaml
-    raw = yaml.safe_load(open(SCENARIO_FILE)) if source == "file" else SCENARIO
-    w = World(SCENARIO_FILE if source == "file" else SCENARIO, 0)
+def test_a_scripted_scenario_loads_and_every_route_adds_up_to_the_duration():
+    raw = SCENARIO
+    w = World(SCENARIO, 0)
     assert w.names == ["A", "B", "C"] and w.duration_s == 7200 and [e["id"] for e in w.edges] == ["edge1", "edge2", "edge3"] and all(e["mode"] == "route" for e in w.edges)
     for e in raw["edges"]:
         assert sum(cfgmod.parse_duration(s.get("for", s.get("over"))) for s in e["route"]) == pytest.approx(w.duration_s)
@@ -352,6 +350,38 @@ def test_the_example_scenario_loads_as_given_and_every_route_adds_up_to_the_dura
     assert [[s["kind"], s["area"], s["t0"], s["t1"]] for s in w.segments("edge1")] == [["stay", "A", 0, 2400], ["move", "B", 2400, 3600], ["stay", "B", 3600, 7200]]
     assert [[s["kind"], s["area"], s["t0"], s["t1"]] for s in w.segments("edge2")] == [["stay", "B", 0, 3000], ["move", "C", 3000, 4200], ["stay", "C", 4200, 7200]]
     assert [s["area"] for s in w.segments("edge3")] == ["C"] and w.segments("edge3")[0]["t1"] == 7200
+
+
+EPISODES = {"ep1_two_edges": (["A", "B"], ["edge1", "edge2"], 2), "ep2_two_edges_cloud": (["A", "B"], ["edge1", "edge2"], 4), "ep3_three_edges_cloud": (["A", "B", "C"], ["edge1", "edge2", "edge3"], 6)}
+
+
+@pytest.mark.parametrize("name", sorted(EPISODES))
+def test_the_example_episodes_load_as_given(name):
+    import yaml
+    areas, edges, n_models = EPISODES[name]
+    path = EXAMPLES / f"{name}.yaml"
+    raw = yaml.safe_load(open(path))
+    w = World(path, 0)
+    assert w.names == areas and [e["id"] for e in w.edges] == edges and len(w.cfg["models"]) == n_models and w.duration_s == 7200
+    assert np.allclose(w.difficulty, 0.3) and w.cfg["random_episodes"] is False and all(e["mode"] == "route" for e in w.edges)
+    assert w.cfg["signals"] == {"cell_noise": False, "blind_cells": False} and raw["signals"] == {"cell_noise": False, "blind_cells": False} and w.blind.sum() == 0               # the examples ship with both off
+    c, f = w.cfg["consistency"], w.cfg["confidence"]
+    assert np.allclose(w.C, np.clip(w.matrix_info["a_c"] + c["bp"] * w.P + c["br"] * w.R, 0.02, 0.98)) and np.allclose(w.Conf, np.clip(w.matrix_info["a_f"] + f["bp"] * w.P + f["br"] * w.R, 0.02, 0.98))
+    for e in raw["edges"]:
+        assert [list(s.values())[1] for s in e["route"]] == ["30m", "60m", "30m"]
+        assert sum(cfgmod.parse_duration(s.get("for", s.get("over"))) for s in e["route"]) == pytest.approx(w.duration_s)
+        assert e["initial_model"] in e["models"]
+    assert [n["kind"] for n in w.nodes].count("cloud") == (0 if name.startswith("ep1") else 1)
+    for i, m in enumerate(w.cfg["models"]):                                          # the quality table is pinned: trained 0.86 (s) / 0.90 (x), elsewhere 0.58 / 0.63, P = R
+        want = [(0.86 if m["size"] == "s" else 0.90) if a in m["trained_areas"] else (0.58 if m["size"] == "s" else 0.63) for a in areas]
+        assert np.allclose(w.P[i], want) and np.allclose(w.R[i], want) and np.allclose(w.F1[i], want)
+    tr = {e: [(t["common"], t["spread"]) for t in v] for e, v in w.transitions.items()}
+    assert tr == {"ep1_two_edges": {"edge1": [(-0.15, 0.0)], "edge2": [(-0.15, 0.0)]}, "ep2_two_edges_cloud": {}, "ep3_three_edges_cloud": {e: [(0.0, 0.10)] for e in edges}}[name]
+    if name != "ep1_two_edges":
+        assert sorted(w.node_models("cloud")) == sorted(m["id"] for m in w.cfg["models"])
+    routes = {e["id"]: [(s["kind"], s["area"]) for s in w.segments(e["id"])] for e in w.edges}
+    first, last = routes[edges[0]][0][1], routes[edges[0]][-1][1]
+    assert first == "A" and last == "B" and routes[edges[0]][1][0] == "move"
 
 
 def test_durations_accept_s_m_min_h_mixed_freely():
@@ -451,8 +481,8 @@ def test_clip_score_and_stream_accept_a_model_stored_on_another_edge(tmp_path):
         w.model_source("edge1", "x_c", "edge2")                                           # edge2 does not store x_c
     w.stream("edge1", [(0, "s_a"), (1800, "x_a"), (3000, "x_c"), (4200, "s_b", "edge2")], tmp_path, logs="minimal")
     s = json.load(open(tmp_path / "summary.json"))["model_schedule"]
-    assert s == [{"t": 0.0, "model": "s_a", "source": "local", "from_edge": "edge1"}, {"t": 1800.0, "model": "x_a", "source": "local", "from_edge": "edge1"},
-                 {"t": 3000.0, "model": "x_c", "source": "fetched", "from_edge": "edge3"}, {"t": 4200.0, "model": "s_b", "source": "fetched", "from_edge": "edge2"}]
+    assert s == [{"t": 0.0, "model": "s_a", "source": "local", "from_node": "edge1"}, {"t": 1800.0, "model": "x_a", "source": "local", "from_node": "edge1"},
+                 {"t": 3000.0, "model": "x_c", "source": "fetched", "from_node": "edge3"}, {"t": 4200.0, "model": "s_b", "source": "fetched", "from_node": "edge2"}]
     assert {json.loads(l)["model_id"] for l in open(tmp_path / "truth.jsonl")} == {"s_a", "x_a", "x_c", "s_b"}
 
 
@@ -465,7 +495,7 @@ def test_the_stream_schedule_text_and_the_one_command_run(tmp_path):
     assert sorted(p.name for p in run.iterdir()) == ["edge1", "edge2", "edge3", "world.json"]
     for e, m in (("edge1", "s_a"), ("edge2", "s_b"), ("edge3", "s_c")):
         assert sorted(p.name for p in (run / e).iterdir()) == ["context.jsonl", "requests.jsonl", "summary.json", "truth.jsonl", "windows.jsonl"]
-        assert json.load(open(run / e / "summary.json"))["model_schedule"] == [{"t": 0.0, "model": m, "source": "local", "from_edge": e}]
+        assert json.load(open(run / e / "summary.json"))["model_schedule"] == [{"t": 0.0, "model": m, "source": "local", "from_node": e}]
     d = json.load(open(run / "world.json"))
     assert [(e["id"], e["mode"], e["models"], e["initial_model"]) for e in d["edges"]] == [("edge1", "route", ["s_a", "x_a"], "s_a"), ("edge2", "route", ["s_b", "x_b"], "s_b"), ("edge3", "route", ["s_c", "x_c"], "s_c")]
     assert d["edges"][0]["route"] == [{"stay": "A", "for": "40m"}, {"move_to": "B", "over": "20m"}, {"stay": "B", "for": "60m"}]
@@ -530,3 +560,243 @@ def test_routed_and_random_edges_can_be_mixed_and_world_json_records_the_mode(tm
     assert len(w.segments("q")) > 1 and all("kind" not in s for s in w.segments("q"))
     # a world with no random edge has no global timeline and does not need front_speed
     assert World(SCENARIO, 0).global_segments == []
+
+
+# ---------------------------------------------------------------------------------------- cloud nodes and the oracle
+def ep(name, seed=0):
+    return World(EXAMPLES / f"{name}.yaml", seed)
+
+
+def test_cloud_nodes_only_store_models_and_are_recorded_in_world_json(tmp_path):
+    w = ep("ep2_two_edges_cloud")
+    assert [(n["id"], n["kind"]) for n in w.nodes] == [("edge1", "edge"), ("edge2", "edge"), ("cloud", "cloud")]
+    assert w.node_models("cloud") == ["s_a", "x_a", "s_b", "x_b"] and w.edge_models("edge1") == ["s_a"] and "cloud" not in w.edge_index
+    assert w.model_locations("s_a") == ["edge1", "cloud"] and w.model_locations("x_a") == ["cloud"]                 # edges first, then the cloud
+    assert w.model_source("edge1", "s_a") == ("local", "edge1") and w.model_source("edge1", "s_b") == ("fetched", "edge2") and w.model_source("edge1", "x_b") == ("fetched", "cloud")
+    assert w.model_source("edge1", "s_b", "cloud") == ("fetched", "cloud") and w.model_source("edge1", "s_a", "cloud") == ("fetched", "cloud")
+    with pytest.raises(ValueError):
+        w.model_source("edge1", "x_a", "edge2")
+    with pytest.raises(KeyError):
+        w.node_models("nowhere")
+    d = json.load(open(w.save(tmp_path / "world.json")))
+    assert d["nodes"] == [{"id": "edge1", "kind": "edge", "models": ["s_a"]}, {"id": "edge2", "kind": "edge", "models": ["s_b"]}, {"id": "cloud", "kind": "cloud", "models": ["s_a", "x_a", "s_b", "x_b"]}]
+    for bad, msg in (({"id": "cloud", "kind": "edge", "models": ["s_a"]}, "kind must be 'cloud'"), ({"id": "edge1", "kind": "cloud", "models": []}, "duplicate node id"),
+                     ({"id": "c", "kind": "cloud", "models": ["nope"]}, "unknown model"), ({"id": "c", "kind": "cloud", "models": [], "route": []}, "unknown key"), ({"kind": "cloud"}, "needs an id")):
+        cfg = {"nodes": [bad]}
+        import yaml
+        cfg = {**yaml.safe_load(open(EXAMPLES / "ep2_two_edges_cloud.yaml")), "nodes": [bad]}
+        with pytest.raises(cfgmod.ConfigError, match=msg):
+            World(cfg, 0)
+
+
+def test_a_cloud_node_has_no_stream_and_no_data_but_serves_models_to_an_edge(tmp_path):
+    w = ep("ep2_two_edges_cloud")
+    with pytest.raises(KeyError):
+        w.stream("cloud", [(0, "s_a")], tmp_path)
+    with pytest.raises(KeyError):
+        w.clip_score("cloud", "s_a", 100.0)
+    w.stream("edge1", [(0, "s_a"), (1800, "x_a"), (3600, "s_b", "edge2")], tmp_path, logs="minimal")
+    s = json.load(open(tmp_path / "summary.json"))["model_schedule"]
+    assert [(x["model"], x["source"], x["from_node"]) for x in s] == [("s_a", "local", "edge1"), ("x_a", "fetched", "cloud"), ("s_b", "fetched", "edge2")]
+
+
+def test_clip_score_of_a_model_stored_only_on_the_cloud_is_the_requesters_data():
+    w = ep("ep2_two_edges_cloud")
+    r = w.clip_score("edge1", "x_a", 3000.0)                                           # x_a is stored on the cloud only
+    a = frames.frame_arrays(w, 0, w.model_index["x_a"], 18000 - 30, 18001)
+    assert r["n_pairs"] == 30 and r["consistency"] == pytest.approx(float(np.median(a["cons"][a["cons_valid"]]))) and r["confidence"] is not None
+    assert np.array_equal(w.frame_truth("edge1", "x_a", 17900, 18001)["n_obj"], w.frame_truth("edge1", "s_a", 17900, 18001)["n_obj"])
+    assert r != w.clip_score("edge2", "x_a", 3000.0)                                   # the data of the asking edge, not of the node that stores the model
+    assert w.clip_score("edge2", "x_a", 3000.0)["n_pairs"] == 30
+
+
+def test_the_oracle_csv_columns_values_and_the_clip_scores_it_is_made_of(tmp_path):
+    import csv
+    from tools.dummy_signals import oracle
+    w = ep("ep2_two_edges_cloud")
+    oracle.write(w, tmp_path)
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["oracle.csv", "oracle_summary.csv", "world.json"]
+    rows = list(csv.DictReader(open(tmp_path / "oracle.csv")))
+    assert list(rows[0]) == oracle.COLUMNS and len(rows) == 2 * 1439 * 4
+    summ = list(csv.DictReader(open(tmp_path / "oracle_summary.csv")))
+    assert list(summ[0]) == oracle.SUMMARY_COLUMNS and [(r["edge"], r["kind"], r["area"]) for r in summ] == [("edge1", "stay", "A"), ("edge1", "move", "A->B"), ("edge1", "stay", "B"), ("edge2", "stay", "B"), ("edge2", "move", "B->A"), ("edge2", "stay", "A")]
+    assert sum(int(r["n_windows"]) for r in summ if r["edge"] == "edge1") == 1439
+    # window k is the clip that ends at 5 (k + 1) s: the same numbers as World.clip_score, and the true F1 comes from the counts of the window's frames
+    for edge, j, model in (("edge1", 0, "s_a"), ("edge1", 700, "x_a"), ("edge2", 1200, "s_b"), ("edge2", 1438, "x_b")):
+        r = next(x for x in rows if x["edge"] == edge and int(x["window"]) == j and x["model"] == model)
+        c = w.clip_score(edge, model, 5.0 * (j + 1))
+        assert float(r["consistency"]) == pytest.approx(c["consistency"], abs=1e-6) and float(r["confidence"]) == pytest.approx(c["confidence"], abs=1e-6)
+        t = w.frame_truth(edge, model, 30 * j + 1, 30 * j + 31)
+        tp, fp, fn = int(t["TP"].sum()), int(t["FP"].sum()), int(t["FN"].sum())
+        assert float(r["true_f1"]) == pytest.approx(2 * tp / (2 * tp + fp + fn), abs=1e-6)
+    for edge in ("edge1", "edge2"):
+        for j in (0, 300, 1000):
+            win = [x for x in rows if x["edge"] == edge and int(x["window"]) == j]
+            ranked = sorted(win, key=lambda x: -float(x["true_f1"] or -1))
+            assert [x["model"] for x in win if x["is_top1"] == "1"] == [ranked[0]["model"]] and all(x["top1_model"] == ranked[0]["model"] for x in win)
+            r0 = win[0]
+            assert [r0["top1_model"], r0["top2_model"], r0["top3_model"]] == [x["model"] for x in ranked[:3]]
+            assert float(r0["top2_delta"]) == pytest.approx(float(ranked[1]["true_f1"]) - float(ranked[0]["true_f1"]), abs=1e-5) and float(r0["top3_delta"]) == pytest.approx(float(ranked[2]["true_f1"]) - float(ranked[0]["true_f1"]), abs=1e-5)
+            assert r0["top3_summary"] == f"{ranked[0]['model']} {float(ranked[0]['true_f1']):.3f} | {ranked[1]['model']} {float(ranked[1]['true_f1']) - float(ranked[0]['true_f1']):.2f} | {ranked[2]['model']} {float(ranked[2]['true_f1']) - float(ranked[0]['true_f1']):.2f}"
+            ini = next(x for x in win if x["is_initial"] == "1")
+            assert float(ini["initial_f1"]) == float(ini["true_f1"]) and float(ini["gap"]) == pytest.approx(float(ranked[0]["true_f1"]) - float(ini["true_f1"]), abs=1e-5)
+            local = [x for x in win if x["location"] == "local"]                                   # best_local: the best model stored on this edge (the option that needs no transfer)
+            bl = max(local, key=lambda x: float(x["true_f1"] or -1))
+            assert r0["best_local_model"] == bl["model"] and float(r0["best_local_f1"]) == pytest.approx(float(bl["true_f1"]), abs=1e-5)
+            assert float(r0["best_local_delta"]) == pytest.approx(float(bl["true_f1"]) - float(ranked[0]["true_f1"]), abs=1e-5) and float(r0["best_local_delta"]) <= 1e-9
+    for r in summ:                                                                                 # the summary ranks by the segment mean and carries the same fields
+        assert float(r["top2_delta"]) <= 1e-9 and float(r["top3_delta"]) <= float(r["top2_delta"]) + 1e-9 and float(r["best_local_delta"]) <= 1e-9
+        assert r["top3_summary"].startswith(f"{r['top1_model']} {float(r['top1_mean_f1']):.3f} | ") and r["top1_model"] != r["top2_model"] != r["top3_model"]
+        assert float(r["gap"]) == pytest.approx(float(r["top1_mean_f1"]) - float(r["initial_mean_f1"]), abs=1e-5)
+    loc = {(r["edge"], r["model"]): (r["location"], r["location_kind"], r["stored_on"]) for r in rows if r["window"] == "0"}
+    assert loc[("edge1", "s_a")] == ("local", "local", "edge1;cloud") and loc[("edge1", "s_b")] == ("edge2", "edge", "edge2;cloud") and loc[("edge1", "x_b")] == ("cloud", "cloud", "cloud")
+    for bad in ("0s", "0.1s", "-5s"):
+        with pytest.raises(cfgmod.ConfigError):
+            oracle.window_pairs(bad)
+    assert oracle.window_pairs("5s") == 30 and oracle.window_pairs("10s") == 60 and oracle.window_pairs("1m") == 360
+
+
+def test_the_oracle_command_writes_outputs_only(tmp_path):
+    cmd = [sys.executable, str(HERE / "generate.py"), "oracle", "--config", str(EXAMPLES / "ep1_two_edges.yaml"), "--seed", "0", "--out", str(tmp_path / "o"), "--window", "10s"]
+    before = sorted(p.name for p in HERE.iterdir())
+    r = subprocess.run(cmd, capture_output=True, text=True, cwd=tmp_path)
+    assert r.returncode == 0, r.stderr
+    assert sorted(p.name for p in (tmp_path / "o").iterdir()) == ["oracle.csv", "oracle_summary.csv", "world.json"] and sorted(p.name for p in HERE.iterdir()) == before
+    assert sum(1 for _ in open(tmp_path / "o" / "oracle.csv")) == 1 + 2 * 719 * 2                       # 10-s windows: 719 per edge, 2 models
+    assert subprocess.run(cmd[:-1] + ["0.1s"], capture_output=True, text=True, cwd=tmp_path).returncode == 2
+
+
+# ---------------------------------------------------------------------------------------- the transition effect of a move
+def _trans_cfg(transition, models=("m", "n"), stays=("30m", "30m")):
+    ms = [{"id": i, "size": "s", "version": "a", "trained_areas": ["A" if i == "m" else "B"]} for i in models]
+    fixed = {i: {"P": [0.86, 0.58] if i == "m" else [0.58, 0.86], "R": [0.86, 0.58] if i == "m" else [0.58, 0.86]} for i in models}
+    step = {"move_to": "B", "over": "60m"}
+    if transition is not None:
+        step["transition"] = transition
+    return {"simple": {"duration": "2h"}, "areas": [{"name": "A", "difficulty": 0.3}, {"name": "B", "difficulty": 0.3}], "models": ms, "matrix": {"fixed": fixed},
+            "edges": [{"id": "e", "models": list(models), "initial_model": models[0], "route": [{"stay": "A", "for": stays[0]}, step, {"stay": "B", "for": stays[1]}]}], "random_episodes": False}
+
+
+def test_the_transition_is_zero_at_both_ends_and_largest_at_the_midpoint():
+    w = World(_trans_cfg({"common": -0.15}), 0)
+    tl = w.edge_tl[0]
+    t0, t1, mid = 1800.0, 5400.0, 3600.0
+    assert abs(tl.shift(t0, 0)) < 1e-12 and abs(tl.shift(t1, 0)) < 1e-12 and tl.shift(mid, 0) == pytest.approx(-0.15)
+    t = np.linspace(t0, t1, 361)
+    v = tl.shift(t, 0)
+    assert np.allclose(v, v[::-1]) and np.all(np.diff(v[:181]) <= 1e-12) and v.min() == pytest.approx(-0.15) and np.argmin(v) == 180      # a hump: monotone to the middle, symmetric
+    assert np.allclose(v, -0.15 * 0.5 * (1 - np.cos(2 * np.pi * (t - t0) / (t1 - t0))))                                                    # the Hann weight
+    assert np.all(tl.shift(np.array([0.0, 900.0, 1799.0, 5401.0, 7000.0]), 0) == 0)                                                         # outside the move: nothing
+    q = w.quality("e", "m", np.array([t0, mid, t1 - 1e-6]))
+    assert np.allclose(q["P"][[0, 2]], [0.86, 0.58], atol=1e-4) and q["P"][1] == pytest.approx(0.72 - 0.15) and q["R"][1] == pytest.approx(0.72 - 0.15)
+    assert q["F1"][1] == pytest.approx(2 * q["P"][1] * q["R"][1] / (q["P"][1] + q["R"][1])) and q["F1"][1] == pytest.approx(0.57)
+
+
+def test_without_a_transition_the_move_is_unchanged():
+    base = World(_trans_cfg(None), 4)
+    zero = World(_trans_cfg({"common": 0.0, "spread": 0.0}), 4)
+    assert base.transitions == {} and list(zero.transitions) == ["e"]
+    for mi in (0, 1):
+        a, b = frames.frame_arrays(base, 0, mi, 0, 43200), frames.frame_arrays(zero, 0, mi, 0, 43200)
+        for k in ("n_obj", "TP", "FP", "FN", "conf", "cons", "f1_cell"):
+            assert np.array_equal(a[k], b[k], equal_nan=True), k
+    t = np.linspace(1800, 5400, 13)
+    q = base.quality("e", "m", t)
+    s = (t - 1800) / 3600
+    assert np.allclose(q["P"], (1 - s) * 0.86 + s * 0.58) and np.allclose(base.edge_tl[0].shift(t, 0), 0)                                  # the plain linear move
+    assert "transitions" in base.to_dict() and base.to_dict()["transitions"] == {}
+
+
+def test_model_deviations_are_drawn_per_seed_or_given_and_recorded(tmp_path):
+    cfg = _trans_cfg({"common": -0.10, "spread": 0.05, "models": {"m": -0.05}})
+    w = World(cfg, 1)
+    rec = w.transitions["e"][0]
+    assert rec["deviation"]["m"] == -0.05 and rec["given"] == {"m": -0.05} and rec["common"] == -0.10 and rec["spread"] == 0.05 and rec["from_area"] == "A" and rec["to_area"] == "B"
+    assert w.edge_tl[0].shift(3600.0, 0) == pytest.approx(-0.15) and w.edge_tl[0].shift(3600.0, 1) == pytest.approx(-0.10 + rec["deviation"]["n"], abs=1e-6)
+    again, other = World(cfg, 1), World(cfg, 2)
+    assert again.transitions == w.transitions and other.transitions["e"][0]["deviation"]["n"] != rec["deviation"]["n"] and other.transitions["e"][0]["deviation"]["m"] == -0.05
+    d = json.load(open(w.save(tmp_path / "world.json")))
+    assert d["transitions"]["e"][0]["deviation"] == rec["deviation"] and d["transitions"]["e"][0]["t0"] == 1800.0 and d["transitions"]["e"][0]["t1"] == 5400.0
+    devs = np.array([World(_trans_cfg({"spread": 0.10}, models=("m", "n")), s).transitions["e"][0]["deviation"]["n"] for s in range(300)])
+    assert abs(devs.mean()) < 0.02 and 0.085 < devs.std() < 0.115                                                                           # N(0, spread)
+    assert World(_trans_cfg({"spread": 0.10}), 0).transitions["e"][0]["deviation"] == World(_trans_cfg({"spread": 0.10}), 0).transitions["e"][0]["deviation"]
+
+
+def test_the_signal_centres_follow_the_shifted_quality_through_their_regression():
+    base, tr = World(_trans_cfg(None), 7), World(_trans_cfg({"common": -0.15}), 7)
+    a, b = frames.frame_arrays(base, 0, 0, 0, 43200), frames.frame_arrays(tr, 0, 0, 0, 43200)
+    mid = (np.arange(43200) >= 3600 * 6 - 360) & (np.arange(43200) < 3600 * 6 + 360)           # one minute around the midpoint of the move
+    ok = a["cons_valid"] & b["cons_valid"] & (a["cons_status"] == 0) & (b["cons_status"] == 0) & mid[1:]
+    c, f = tr.cfg["consistency"], tr.cfg["confidence"]
+    assert ok.sum() > 300 and np.mean(b["cons"][ok] - a["cons"][ok]) == pytest.approx(-0.15 * (c["bp"] + c["br"]) * 0.99, abs=0.01)
+    okf = a["conf_valid"] & b["conf_valid"] & mid
+    assert np.mean(b["conf"][okf] - a["conf"][okf]) == pytest.approx(-0.15 * (f["bp"] + f["br"]) * 0.99, abs=0.012)
+    assert np.mean(b["f1_cell"][mid] - a["f1_cell"][mid]) == pytest.approx(-0.15, abs=0.003)                                              # F1 is recomputed from the shifted P and R
+    far = np.arange(43200) < 1800 * 6                                                                                                     # before the move: identical
+    assert np.array_equal(a["TP"][far], b["TP"][far]) and np.array_equal(a["n_obj"], b["n_obj"])                                          # the object count is a property of the data
+
+
+def test_transition_validation():
+    for tr, msg in (({"common": "x"}, "must be a number"), ({"spread": -0.1}, "spread must be >= 0"), ({"bogus": 1}, "unknown transition key"), ({"models": {"zz": 0.1}}, "unknown model"),
+                    ({"models": {"m": "a"}}, "must be a number"), ({"models": [1]}, "must map model ids"), ("fast", "must be a mapping")):
+        with pytest.raises(cfgmod.ConfigError, match=msg):
+            World(_trans_cfg(tr), 0)
+    cfg = _trans_cfg({"common": 0.1})
+    cfg["edges"][0]["route"][0]["transition"] = {"common": 0.1}
+    cfg["edges"][0]["route"][0]["for"] = "30m"
+    with pytest.raises(cfgmod.ConfigError, match="only allowed on a move_to step"):
+        World(cfg, 0)
+
+
+def test_a_positive_common_makes_every_model_better_and_an_episode_has_no_mixed_zone():
+    w = World(_trans_cfg({"common": 0.05}), 0)
+    q = w.quality("e", "m", np.array([3600.0]))
+    assert q["P"][0] == pytest.approx(0.72 + 0.05) and q["F1"][0] > 0.72
+    cfg = _trans_cfg({"common": -0.15})
+    cfg["random_episodes"] = True
+    cfg["local_episodes"] = {"rate_per_hour": 60, "median_s": 600, "sigma": 0.1}
+    w = World(cfg, 3)
+    t0, t1, r = w.episodes[0][0]
+    assert w.edge_tl[0].shift((t0 + t1) / 2, 0) == 0.0
+
+
+def test_the_oracle_with_two_models_has_an_empty_third_place_and_best_local_can_be_the_top(tmp_path):
+    import csv
+    from tools.dummy_signals import oracle
+    w = ep("ep1_two_edges")
+    oracle.write(w, tmp_path)
+    rows = list(csv.DictReader(open(tmp_path / "oracle.csv")))
+    assert all(r["top3_model"] == "" and r["top3_delta"] == "" and r["top3_summary"].count("|") == 1 for r in rows[:50])
+    assert all(r["best_local_model"] == ("s_a" if r["edge"] == "edge1" else "s_b") for r in rows)         # each edge stores one model only
+    summ = list(csv.DictReader(open(tmp_path / "oracle_summary.csv")))
+    assert summ[0]["best_local_delta"] == "0.000000" and float(summ[2]["best_local_delta"]) < -0.2 and summ[2]["top1_location"] == "edge2"
+
+
+def test_the_signal_switches_default_to_on_and_validate_their_values():
+    import yaml
+    assert World(None, 1).cfg["signals"] == {"cell_noise": True, "blind_cells": True}
+    assert yaml.safe_load("signals: {cell_noise: off, blind_cells: on}")["signals"] == {"cell_noise": False, "blind_cells": True}
+    for bad in ("maybe", 3, None):
+        with pytest.raises(cfgmod.ConfigError, match="use on / off / true / false"):
+            World({"signals": {"cell_noise": bad}}, 0)
+        with pytest.raises(cfgmod.ConfigError, match="use on / off / true / false"):
+            World({"signals": {"blind_cells": bad}}, 0)
+    with pytest.raises(cfgmod.ConfigError, match="unknown parameter"):
+        World({"signals": {"cell_noises": "off"}}, 0)
+
+
+def test_cell_noise_off_makes_the_centres_follow_p_and_r_and_blind_cells_off_removes_them():
+    on = World({"blind": {"beta": 1.0}}, 5)
+    off_noise = World({"blind": {"beta": 1.0}, "signals": {"cell_noise": "off"}}, 5)
+    off_blind = World({"blind": {"beta": 1.0}, "signals": {"blind_cells": "off"}}, 5)
+    c, f = on.cfg["consistency"], on.cfg["confidence"]
+    assert on.blind.sum() == (~on.trained).sum() and off_blind.blind.sum() == 0 and off_noise.blind.sum() == on.blind.sum()
+    assert np.array_equal(on.P, off_noise.P) and np.array_equal(on.F1, off_blind.F1)                         # the quality is untouched
+    exact_c = on.matrix_info["a_c"] + c["bp"] * off_noise.P + c["br"] * off_noise.R
+    exact_f = on.matrix_info["a_f"] + f["bp"] * off_noise.P + f["br"] * off_noise.R
+    shift = on.cfg["blind"]["shift_sd"] * c["cell_noise_sd"]                                                 # a blind cell keeps its raise even when the cell noise is off
+    inside = (exact_c + shift) < 0.98
+    assert np.allclose(off_noise.C[~off_noise.blind], np.clip(exact_c, 0.02, 0.98)[~off_noise.blind]) and np.allclose((off_noise.C - np.clip(exact_c, 0.02, 0.98))[off_noise.blind & inside], shift)
+    assert np.allclose(off_noise.Conf, np.clip(exact_f, 0.02, 0.98)) and not np.allclose(on.Conf, np.clip(exact_f, 0.02, 0.98))
+    both = World({"signals": {"cell_noise": False, "blind_cells": False}}, 5)
+    assert np.allclose(both.C, np.clip(both.matrix_info["a_c"] + c["bp"] * both.P + c["br"] * both.R, 0.02, 0.98)) and both.blind.sum() == 0

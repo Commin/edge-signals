@@ -33,6 +33,11 @@ def frame_arrays(w, ei: int, mi: int, f0: int, f1: int) -> dict:
     z = np.sqrt(iid) * rng.normal(seed, rng.L_Z, ei, F, 0) + np.sqrt(1 - iid) * rng.value_noise(int(fr["z_slow_period_s"] * FPS), F, seed, rng.L_Z, ei, 1)
     Rb = (1 - s) * w.R[mi, a] + s * w.R[mi, b]
     Pb = (1 - s) * w.P[mi, a] + s * w.P[mi, b]
+    sh = w.edge_tl[ei].shift(t, mi)                                           # transition effect of a move (0 unless the move has one)
+    dP = dR = np.zeros(len(F))
+    if sh.any():
+        dP, dR = np.clip(Pb + sh, 0.01, 0.995) - Pb, np.clip(Rb + sh, 0.01, 0.995) - Rb
+        Pb, Rb = Pb + dP, Rb + dR
     rn, pn = fr["recall_noise"], fr["precision_noise"]
     r = np.clip(Rb + rn["gamma_z"] * z + rn["model_noise"] * rng.normal(seed, rng.L_RECALL, ei, mi, F), 0.01, 0.995)
     p = np.clip(Pb + pn["gamma_z"] * z + pn["model_noise"] * rng.normal(seed, rng.L_PRECISION, ei, mi, F), 0.01, 0.995)
@@ -50,12 +55,16 @@ def frame_arrays(w, ei: int, mi: int, f0: int, f1: int) -> dict:
     # confidence per frame (invalid when the frame has no boxes)
     cf = cfg["confidence_frame"]
     Cfb = (1 - s) * w.Conf[mi, a] + s * w.Conf[mi, b]
+    if sh.any():                                                              # the centres follow the shifted quality through their regression on P and R
+        Cfb = np.clip(Cfb + cfg["confidence"]["bp"] * dP + cfg["confidence"]["br"] * dR, 0.02, 0.98)
     # the mean confidence of the kept boxes: its noise shrinks with the number of boxes (reference: 8 boxes per frame)
     conf = rng.reflect01(Cfb + cf["gamma_z"] * z + cf["gamma_p_hat"] * dp + cf["gamma_r_hat"] * dr + cf["model_noise"] * np.sqrt(8.0 / np.maximum(nbox, 1)) * rng.normal(seed, rng.L_CONF, ei, mi, F))
     # consistency per pair (k-1, k)
     cs = cfg["consistency_frame"]
     Fp, sp, ap, bp = F[1:], s[1:], a[1:], b[1:]
     Cb = (1 - sp) * w.C[mi, ap] + sp * w.C[mi, bp]
+    if sh.any():
+        Cb = np.clip(Cb + cfg["consistency"]["bp"] * dP[1:] + cfg["consistency"]["br"] * dR[1:], 0.02, 0.98)
     wstd = cs["wander_calibrated_std"] if cs["wander"] == "calibrated" else float(cs["wander"])
     per = int(cs["wander_period_s"] * FPS)
     sh = cs["wander_shared_share"]

@@ -40,6 +40,7 @@ edges:                                # id, position along the route in km (omit
   - {id: e2, position: 20}            #   route: [{stay: AREA, for: DURATION}, {move_to: AREA, over: DURATION}, ...]  (an edge with a route ignores the global timeline and its position; the steps must add up to simple.duration)
   - {id: e3, position: 45}
 position_range: [0, 60]
+nodes: []                             # nodes that are not edges: [{id: cloud, kind: cloud, models: [s_a, x_a]}]. A cloud node only stores models (no route, no data, no stream); any node can serve a model to an edge
 random_episodes: true                 # on | off (true | false): local episodes below; on a route they replace the area abruptly for their duration
 local_episodes:                       # a Poisson process per edge; each episode shows a random area to that edge only
   rate_per_hour: 1.5
@@ -71,6 +72,9 @@ confidence:                           # centre Conf[m,k] = a + bp * P + br * R +
   bp: 0.240
   br: 0.183
   cell_noise_sd: 0.040
+signals:                              # switches of the random parts of the consistency / confidence centres of the (model, area) cells; on | off (true | false)
+  cell_noise: on                      # random cell offsets of the centres (sigma_C, sigma_Conf below): on = realistic, for experiments; off = the centres follow P and R exactly
+  blind_cells: on                     # cells where consistency overstates quality (blind, below): on = realistic, for experiments; off = no blind cell
 blind:
   beta: 0.05                          # per untrained (m,k): the consistency centre is raised (consistency overestimates the quality of the cell); confidence is not affected
   shift_sd: 2.0                       # the raise, in units of consistency.cell_noise_sd (2 x 0.033 = about 0.066)

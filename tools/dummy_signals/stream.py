@@ -26,13 +26,13 @@ REASON = {"consistency": "EMPTY_PAIR", "confidence": "no_boxes"}
 
 
 def parse_schedule(sched, model_ids, default=None):
-    """[(t, model_id, from_edge or None)] sorted; the first entry must be at t = 0. An entry is (t, model), (t, model, from_edge) or {"t", "model", "from_edge"}."""
+    """[(t, model_id, from_node or None)] sorted; the first entry must be at t = 0. An entry is (t, model), (t, model, from_node) or {"t", "model", "from_node"}."""
     if not sched:
         return [(0.0, default or model_ids[0], None)]
     out = []
     for e in sched:
         if isinstance(e, dict):
-            t, m, fe = e["t"], e["model"], e.get("from_edge")
+            t, m, fe = e["t"], e["model"], e.get("from_node")
         else:
             t, m, fe = e[0], e[1], (e[2] if len(e) > 2 else None)
         if m not in model_ids:
@@ -45,7 +45,7 @@ def parse_schedule(sched, model_ids, default=None):
 
 
 def parse_schedule_text(text, model_ids):
-    """'0:s_a,3600:x_b,7200:x_c@edge2': time in seconds, model id, optionally @edge the model is fetched from."""
+    """'0:s_a,3600:x_b,7200:x_c@cloud': time in seconds, model id, optionally @node the model is fetched from (an edge or a cloud node)."""
     ent = []
     for p in text.split(","):
         if not p.strip():
@@ -140,7 +140,7 @@ def run(w, ei, schedule, out_dir=None, log_signals=True, delta=None, logs="full"
     edge = w.edges[ei]["id"]
     mids = [m["id"] for m in w.cfg["models"]]
     sched = parse_schedule(schedule, mids)
-    src = [w.model_source(ei, m, fe) for _, m, fe in sched]                 # any model can be run: a model that is not stored on the edge is fetched from the edge that stores it
+    src = [w.model_source(ei, m, fe) for _, m, fe in sched]                 # any model can be run: a model that is not stored on the edge is fetched from the node that stores it
     N = w.n_frames
     fb = [min(int(round(t * FPS)), N) for t, _, _ in sched] + [N]
     eng, FrameRecord = make_engine(FPS, out_dir, log_signals, delta, minimal=(logs == "minimal"))
@@ -179,7 +179,7 @@ def run(w, ei, schedule, out_dir=None, log_signals=True, delta=None, logs="full"
     if truth is not None:
         truth.close()
         wins = res["windows"]
-        summary = {"synthetic": True, "edge": edge, "seed": w.seed, "model_schedule": [{"t": t, "model": m, "source": sc, "from_edge": fe} for (t, m, _), (sc, fe) in zip(sched, src)], "n_frames": eng.n_frames, "n_pairs": eng.n_pairs,
+        summary = {"synthetic": True, "edge": edge, "seed": w.seed, "model_schedule": [{"t": t, "model": m, "source": sc, "from_node": fe} for (t, m, _), (sc, fe) in zip(sched, src)], "n_frames": eng.n_frames, "n_pairs": eng.n_pairs,
                    "n_windows": len(wins), "n_windows_by_signal": {n: sum(1 for x in wins if x.signal == n) for n in sorted({x.signal for x in wins})}, "n_requests": len(res["triggers"]),
                    "dropped_partial_windows": eng.dropped_partial_windows, "delta": eng.trigger.flag_rule.delta,
                    "n_windows_note": "n_windows counts window records over both signals (as in windows.jsonl); n_windows_by_signal gives the count per signal"}
